@@ -1,0 +1,16 @@
+{
+  "name": "game",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "build": "npm run test && npm run build:tienlen",
+    "build:tienlen": "node scripts/build.mjs",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "dry-run": "npm run build && wrangler deploy --dry-run"
+  },
+  "devDependencies": {
+    "wrangler": "^4.118.0"
+  }
+}

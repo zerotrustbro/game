@@ -1,0 +1,25 @@
+name = "chungbuild-game"
+main = "worker/index.js"
+compatibility_date = "2025-07-18"
+
+[build]
+command = "npm run build"
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]
+
+[observability]
+enabled = false
+
+[vars]
+GAME_NAME = "Tiến Lên Miền Nam"

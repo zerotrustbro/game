@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#071b1d" />
+    <meta name="description" content="Tiến Lên Miền Nam — phòng bài realtime cho 2–4 người." />
+    <title>Tiến Lên — Game Room</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="Game hub home"><span class="brand-mark">♠</span><span><b>GAME</b><small>ROOM</small></span></a>
+        <div class="topbar-right"><span class="connection-dot" id="connectionDot"></span><span id="connectionText">Chưa kết nối</span><button class="icon-button" id="soundButton" type="button" aria-label="Bật tắt âm thanh">◖</button></div>
+      </header>
+
+      <main>
+        <section id="homeView" class="home-view">
+          <div class="hero-copy"><p class="eyebrow">PHÒNG BÀI TRỰC TUYẾN</p><h1>Tiến Lên<br /><em>Miền Nam</em></h1><p class="hero-lead">Một ván bài đẹp, nhanh và công bằng.<br />Mời bạn bè vào bàn bằng một mã phòng.</p><div class="hero-rule"><span></span><i>♣ ♦ ♥ ♠</i><span></span></div></div>
+          <div class="lobby-card">
+            <div class="lobby-card-header"><span class="mini-label">BẮT ĐẦU VÁN</span><span class="players-badge">2—4 NGƯỜI</span></div>
+            <label class="field-label" for="playerName">Tên của bạn</label><input id="playerName" class="text-input" maxlength="18" placeholder="Nhập tên hiển thị" autocomplete="nickname" />
+            <label class="field-label">Chọn chân dung</label><div class="avatar-picker" id="avatarPicker" role="radiogroup" aria-label="Chọn chân dung"></div>
+            <button class="primary-button" id="createButton" type="button"><span>Tạo phòng mới</span><b>→</b></button>
+            <div class="divider"><span>hoặc tham gia phòng</span></div>
+            <div class="join-row"><input id="roomInput" class="text-input room-input" maxlength="8" placeholder="MÃ PHÒNG" autocomplete="off" /><button class="secondary-button" id="joinButton" type="button">Vào bàn</button></div>
+            <p class="form-note" id="homeMessage">Không cần tài khoản. Tên và chân dung chỉ dùng cho ván này.</p>
+          </div>
+        </section>
+
+        <section id="roomView" class="room-view hidden">
+          <div class="room-head"><div><p class="eyebrow">PHÒNG <strong id="roomCodeLabel">—</strong></p><h2 id="roomTitle">Đang chờ người chơi</h2></div><div class="room-head-actions"><button class="ghost-button" id="copyRoomButton" type="button">Sao chép mã</button><button class="ghost-button danger" id="leaveButton" type="button">Rời phòng</button></div></div>
+          <div class="table-scene">
+            <div class="table-ambient"></div><div class="table-surface"><div class="table-inlay"></div><div class="table-center" id="tableCenter"><div class="turn-kicker" id="turnKicker">PHÒNG CHỜ</div><div class="last-play" id="lastPlay">Mời thêm người chơi để bắt đầu</div><div class="pile" id="pile"><img src="/assets/cards/card-back.png" alt="Bộ bài úp" /></div><div class="table-status" id="tableStatus">Chủ phòng có thể bắt đầu khi đủ người.</div></div></div>
+            <div class="seat seat-top" id="seatTop"></div><div class="seat seat-left" id="seatLeft"></div><div class="seat seat-right" id="seatRight"></div><div class="seat seat-bottom" id="seatBottom"></div>
+          </div>
+          <div class="room-toolbar"><div class="lobby-players" id="lobbyPlayers"></div><button class="primary-button compact hidden" id="startButton" type="button">Chia bài & bắt đầu <b>→</b></button><button class="primary-button compact hidden" id="rematchButton" type="button">Ván mới <b>↻</b></button></div>
+          <section class="hand-panel"><div class="hand-head"><div><p class="eyebrow">BÀI TRÊN TAY</p><h3 id="handTitle">Bạn chưa vào bàn</h3></div><div class="hand-actions"><button class="secondary-button compact" id="passButton" type="button" disabled>Bỏ lượt</button><button class="primary-button compact" id="playButton" type="button" disabled>Đánh bài <b>↑</b></button></div></div><div id="hand" class="hand" aria-live="polite"></div><p class="selection-hint" id="selectionHint">Chọn một hoặc nhiều lá bài để đánh.</p></section>
+          <div class="rules-strip"><span><b>3♠</b> đi trước</span><span><b>♥</b> cùng loại mới đè được</span><span><b>♣♣♣</b> đôi thông / tứ quý chặt 2</span></div>
+        </section>
+      </main>
+      <div class="toast" id="toast" role="status"></div>
+    </div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
