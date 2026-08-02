@@ -122,14 +122,29 @@ function renderRoom() {
   $('rematchButton').classList.toggle('hidden', !room.gameOver || !isHost);
   $('roomTitle').textContent = room.gameOver ? `${room.winner === state.playerId ? 'Bạn thắng ván này' : 'Ván đã kết thúc'}` : room.phase === 'game' ? (isTurn ? 'Đến lượt bạn' : 'Đang trong ván') : 'Đang chờ người chơi';
   $('turnKicker').textContent = room.gameOver ? 'KẾT QUẢ' : room.phase === 'game' ? (isTurn ? 'LƯỢT CỦA BẠN' : `LƯỢT ${room.players.find((player) => player.id === room.turnPlayerId)?.name || ''}`) : 'PHÒNG CHỜ';
-  const current = room.currentPlay;
-  $('lastPlay').innerHTML = current ? `${esc(room.players.find((player) => player.id === current.playerId)?.name || '')} đánh <b>${current.cards.map(cardLabel).join(' ')}</b>` : room.phase === 'game' ? 'Vòng mới — người vừa đánh được quyền dẫn' : 'Mời thêm người chơi để bắt đầu';
+  renderCurrentPlay(room);
   $('tableStatus').textContent = room.gameOver ? (room.winner === state.playerId ? 'Chúc mừng — bạn là người hết bài trước.' : `${esc(room.players.find((player) => player.id === room.winner)?.name || 'Đối thủ')} đã thắng.`) : room.phase === 'game' ? (isTurn ? 'Chọn bài trên tay rồi đánh.' : 'Theo dõi lượt của đối thủ.') : (players.length < 2 ? 'Cần ít nhất 2 người để chia bài.' : (isHost ? 'Bạn có thể bắt đầu ván.' : 'Đợi chủ phòng bắt đầu ván.'));
   renderHand(room, isTurn);
 }
 
-function cardLabel(card) {
-  return `<span class="inline-card ${SUIT_CLASS[cardSuit(card)]}">${esc(cardRank(card))}${SUIT_MARKS[cardSuit(card)]}</span>`;
+function renderCurrentPlay(room) {
+  const current = room.currentPlay;
+  $('pile').classList.toggle('hidden', Boolean(current));
+  if (!current) {
+    $('lastPlay').innerHTML = room.phase === 'game'
+      ? '<span class="played-empty">Vòng mới — người vừa đánh được quyền dẫn</span>'
+      : '<span class="played-empty">Mời thêm người chơi để bắt đầu</span>';
+    return;
+  }
+  const playerName = esc(room.players.find((player) => player.id === current.playerId)?.name || 'Người chơi');
+  const countClass = Math.min(current.cards.length, 8);
+  $('lastPlay').innerHTML = `<div class="played-by"><b>${playerName}</b> vừa đánh</div><div class="played-cards count-${countClass}" aria-label="Bộ bài vừa đánh">${current.cards.map(tableCardMarkup).join('')}</div>`;
+}
+
+function tableCardMarkup(card, index) {
+  const suit = cardSuit(card);
+  const rank = cardRank(card);
+  return `<div class="table-card ${SUIT_CLASS[suit]}" style="--i:${index}" aria-label="${esc(rank)} ${SUIT_NAMES[suit]}"><span class="card-corner top"><b>${esc(rank)}</b><i>${SUIT_MARKS[suit]}</i></span><span class="card-suit">${SUIT_MARKS[suit]}</span><span class="card-corner bottom"><b>${esc(rank)}</b><i>${SUIT_MARKS[suit]}</i></span></div>`;
 }
 
 function cardMarkup(card, index) {
