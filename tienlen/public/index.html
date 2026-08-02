@@ -15,7 +15,7 @@
     <div class="app-shell">
       <header class="topbar">
         <a class="brand" href="/" aria-label="Về Game Room hub"><span class="brand-mark">♠</span><span><b>GAME</b><small>ROOM</small></span></a>
-        <div class="topbar-right"><span class="connection-dot" id="connectionDot"></span><span id="connectionText">Chưa kết nối</span><button class="icon-button" id="soundButton" type="button" aria-label="Bật tắt âm thanh">◖</button></div>
+        <div class="topbar-right"><span class="connection-dot" id="connectionDot"></span><span id="connectionText">Chưa kết nối</span><button class="account-button" id="accountButton" type="button">Tài khoản</button><button class="icon-button" id="soundButton" type="button" aria-label="Bật tắt âm thanh">◖</button></div>
       </header>
 
       <main>
@@ -34,7 +34,7 @@
             <button class="primary-button" id="createButton" type="button"><span>Tạo phòng mới</span><b>→</b></button>
             <div class="divider"><span>hoặc tham gia phòng</span></div>
             <div class="join-row"><input id="roomInput" class="text-input room-input" maxlength="8" placeholder="MÃ PHÒNG" autocomplete="off" /><button class="secondary-button" id="joinButton" type="button">Vào bàn</button></div>
-            <p class="form-note" id="homeMessage">Không cần tài khoản. Tên và chân dung chỉ dùng cho ván này.</p>
+            <p class="form-note" id="homeMessage">Đăng nhập để nhận diện người chơi và dùng chung ví xu.</p>
           </div>
         </section>
 
@@ -49,6 +49,16 @@
           <div class="rules-strip"><span><b>3♠</b> đi trước</span><span><b>♥</b> cùng loại mới đè được</span><span><b>♣♣♣</b> đôi thông / tứ quý chặt 2</span></div>
         </section>
       </main>
+      <div class="auth-backdrop hidden" id="authBackdrop"></div>
+      <section class="auth-panel hidden" id="authPanel" aria-labelledby="authTitle">
+        <button class="auth-close" id="authClose" type="button" aria-label="Đóng">×</button>
+        <p class="eyebrow">GAME ROOM ACCOUNT</p><h2 id="authTitle">Đăng nhập để chơi</h2><p class="auth-lead">Tài khoản đơn giản để biết ai đang chơi. Mỗi tài khoản bắt đầu với <b>100 xu</b>.</p>
+        <div class="auth-tabs"><button class="auth-tab active" id="loginTab" type="button">Đăng nhập</button><button class="auth-tab" id="registerTab" type="button">Tạo tài khoản</button></div>
+        <form id="loginForm" class="auth-form"><label class="field-label" for="loginUsername">Tên tài khoản</label><input id="loginUsername" class="text-input" maxlength="18" autocomplete="username" required placeholder="vd: chungbuild" /><label class="field-label" for="loginPassword">Mật khẩu</label><input id="loginPassword" class="text-input" type="password" maxlength="72" autocomplete="current-password" required placeholder="Ít nhất 6 ký tự" /><button class="primary-button" type="submit">Đăng nhập <b>→</b></button></form>
+        <form id="registerForm" class="auth-form hidden"><label class="field-label" for="registerUsername">Tên tài khoản</label><input id="registerUsername" class="text-input" maxlength="18" autocomplete="username" required placeholder="a-z, 0-9 hoặc _" /><label class="field-label" for="registerDisplayName">Tên hiển thị</label><input id="registerDisplayName" class="text-input" maxlength="18" autocomplete="nickname" required placeholder="Tên mọi người sẽ thấy" /><label class="field-label" for="registerPassword">Mật khẩu</label><input id="registerPassword" class="text-input" type="password" maxlength="72" autocomplete="new-password" required placeholder="Ít nhất 6 ký tự" /><button class="primary-button" type="submit">Tạo tài khoản <b>→</b></button></form>
+        <div class="auth-error" id="authError" role="alert"></div>
+        <div class="account-summary hidden" id="accountSummary"><div><span class="mini-label">ĐANG ĐĂNG NHẬP</span><b id="accountName">—</b></div><strong><span id="accountCoins">0</span> xu</strong><button class="secondary-button compact" id="logoutButton" type="button">Đăng xuất</button></div>
+      </section>
       <div class="toast" id="toast" role="status"></div>
     </div>
     <script type="module" src="/app.js"></script>

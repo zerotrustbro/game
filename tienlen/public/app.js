@@ -12,6 +12,7 @@ const state = {
   name: localStorage.getItem('tienlen-name') || '',
   avatar: Number(localStorage.getItem('tienlen-avatar') || 1),
   room: null,
+  user: null,
   selected: new Set(),
   sound: localStorage.getItem('tienlen-sound') !== 'off',
 };
@@ -28,6 +29,9 @@ const toast = $('toast');
 const connectionDot = $('connectionDot');
 const connectionText = $('connectionText');
 const initialRoute = parseRoute(location.pathname);
+const authPanel = $('authPanel');
+const authBackdrop = $('authBackdrop');
+let pendingRoomCode = null;
 
 playerName.value = state.name;
 $('soundButton').textContent = state.sound ? '◖' : '◌';
@@ -48,6 +52,50 @@ function setConnection(label, connected = false) {
   connectionDot.className = `connection-dot ${connected ? 'online' : ''}`;
 }
 
+function updateAccountUi() {
+  $('accountButton').textContent = state.user ? `${state.user.displayName} · ${state.user.coins} xu` : 'Tài khoản';
+  $('accountSummary').classList.toggle('hidden', !state.user);
+  $('loginForm').classList.toggle('hidden', Boolean(state.user));
+  $('registerForm').classList.toggle('hidden', Boolean(state.user));
+  $('loginTab').classList.toggle('hidden', Boolean(state.user));
+  $('registerTab').classList.toggle('hidden', Boolean(state.user));
+  $('authTitle').textContent = state.user ? 'Tài khoản của bạn' : 'Đăng nhập để chơi';
+  $('accountName').textContent = state.user?.displayName || '—';
+  $('accountCoins').textContent = state.user?.coins ?? 0;
+}
+
+function openAuth() {
+  $('authError').textContent = '';
+  authPanel.classList.remove('hidden');
+  authBackdrop.classList.remove('hidden');
+  document.body.classList.add('modal-open');
+}
+
+function closeAuth() {
+  authPanel.classList.add('hidden');
+  authBackdrop.classList.add('hidden');
+  document.body.classList.remove('modal-open');
+}
+
+async function authRequest(path, body) {
+  const response = await fetch(`/api/auth${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Không thể xử lý tài khoản.');
+  return data.user;
+}
+
+async function loadAccount() {
+  const response = await fetch('/api/auth/me');
+  if (response.ok) state.user = (await response.json()).user;
+  updateAccountUi();
+  if (state.user && pendingRoomCode) {
+    const code = pendingRoomCode;
+    pendingRoomCode = null;
+    closeAuth();
+    connect(code);
+  }
+}
+
 function makeRoomCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
@@ -56,6 +104,12 @@ function makeRoomCode() {
 function connect(code, { push = false } = {}) {
   state.roomCode = code.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
   if (!/^[A-Z0-9]{4,8}$/.test(state.roomCode)) return showToast('Mã phòng cần có 4–8 ký tự.', 'error');
+  if (!state.user) {
+    pendingRoomCode = state.roomCode;
+    showGameLobby(state.roomCode);
+    openAuth();
+    return;
+  }
   history[push ? 'pushState' : 'replaceState']({}, '', roomPath(state.roomCode));
   if (state.socket) state.socket.close();
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -162,10 +216,15 @@ function renderRoom() {
   $('lobbyPlayers').innerHTML = players.map((player) => `<span class="lobby-player ${player.connected ? '' : 'offline'}"><img src="${AVATARS[(player.avatar || 1) - 1]}" alt="" />${esc(player.name)}</span>`).join('');
   $('startButton').classList.toggle('hidden', room.phase !== 'lobby' || !isHost);
   $('rematchButton').classList.toggle('hidden', !room.gameOver || !isHost);
-  $('roomTitle').textContent = room.gameOver ? `${room.winner === state.playerId ? 'Bạn thắng ván này' : 'Ván đã kết thúc'}` : room.phase === 'game' ? (isTurn ? 'Đến lượt bạn' : 'Đang trong ván') : 'Đang chờ người chơi';
+  $('roomTitle').textContent = room.gameOver ? `${room.winner === room.you ? 'Bạn thắng ván này' : 'Ván đã kết thúc'}` : room.phase === 'game' ? (isTurn ? 'Đến lượt bạn' : 'Đang trong ván') : 'Đang chờ người chơi';
+  if (room.wallet !== null && state.user) {
+    state.user.coins = room.wallet;
+    updateAccountUi();
+  }
   $('turnKicker').textContent = room.gameOver ? 'KẾT QUẢ' : room.phase === 'game' ? (isTurn ? 'LƯỢT CỦA BẠN' : `LƯỢT ${room.players.find((player) => player.id === room.turnPlayerId)?.name || ''}`) : 'PHÒNG CHỜ';
   renderCurrentPlay(room);
-  $('tableStatus').textContent = room.gameOver ? (room.winner === state.playerId ? 'Chúc mừng — bạn là người hết bài trước.' : `${esc(room.players.find((player) => player.id === room.winner)?.name || 'Đối thủ')} đã thắng.`) : room.phase === 'game' ? (isTurn ? 'Chọn bài trên tay rồi đánh.' : 'Theo dõi lượt của đối thủ.') : (players.length < 2 ? 'Cần ít nhất 2 người để chia bài.' : (isHost ? 'Bạn có thể bắt đầu ván.' : 'Đợi chủ phòng bắt đầu ván.'));
+  const settlement = room.settlement?.changes?.find((change) => change.playerId === room.you);
+  $('tableStatus').textContent = room.gameOver ? `${room.winner === room.you ? 'Chúc mừng — bạn là người hết bài trước.' : `${esc(room.players.find((player) => player.id === room.winner)?.name || 'Đối thủ')} đã thắng.`} ${settlement ? `${settlement.amount >= 0 ? '+' : ''}${settlement.amount} xu.` : ''}` : room.phase === 'game' ? (isTurn ? 'Chọn bài trên tay rồi đánh.' : 'Theo dõi lượt của đối thủ.') : (players.length < 2 ? 'Cần ít nhất 2 người để bắt đầu.' : (isHost ? 'Bạn có thể bắt đầu ván.' : 'Đợi chủ phòng bắt đầu ván.'));
   renderHand(room, isTurn);
 }
 
@@ -246,7 +305,47 @@ $('soundButton').addEventListener('click', () => {
   $('soundButton').textContent = state.sound ? '◖' : '◌';
 });
 
+$('accountButton').addEventListener('click', openAuth);
+$('authClose').addEventListener('click', closeAuth);
+authBackdrop.addEventListener('click', closeAuth);
+$('loginTab').addEventListener('click', () => {
+  $('loginTab').classList.add('active'); $('registerTab').classList.remove('active');
+  $('loginForm').classList.remove('hidden'); $('registerForm').classList.add('hidden'); $('authTitle').textContent = 'Đăng nhập để chơi';
+});
+$('registerTab').addEventListener('click', () => {
+  $('registerTab').classList.add('active'); $('loginTab').classList.remove('active');
+  $('registerForm').classList.remove('hidden'); $('loginForm').classList.add('hidden'); $('authTitle').textContent = 'Tạo tài khoản';
+});
+async function finishAuth(user) {
+  state.user = user;
+  state.name = user.displayName;
+  localStorage.setItem('tienlen-name', state.name);
+  updateAccountUi();
+  closeAuth();
+  if (pendingRoomCode) { const code = pendingRoomCode; pendingRoomCode = null; connect(code); }
+}
+$('loginForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try { await finishAuth(await authRequest('/login', { username: $('loginUsername').value, password: $('loginPassword').value })); }
+  catch (error) { $('authError').textContent = error.message; }
+});
+$('registerForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try { await finishAuth(await authRequest('/register', { username: $('registerUsername').value, displayName: $('registerDisplayName').value, password: $('registerPassword').value })); }
+  catch (error) { $('authError').textContent = error.message; }
+});
+$('logoutButton').addEventListener('click', async () => {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  state.user = null;
+  state.socket?.close();
+  state.socket = null;
+  updateAccountUi();
+  closeAuth();
+  showHub();
+});
+
 renderAvatarPicker();
+loadAccount();
 document.querySelector('.brand').addEventListener('click', (event) => {
   event.preventDefault();
   history.pushState({}, '', '/');

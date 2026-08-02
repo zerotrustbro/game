@@ -19,6 +19,7 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; min-width: 320px; min-height: 100%; background: var(--ink); }
 body { min-height: 100vh; overflow-x: hidden; background: radial-gradient(circle at 50% -10%, #1c4a4c 0, transparent 38rem), var(--ink); }
+body.modal-open { overflow: hidden; }
 button, input { font: inherit; }
 button { color: inherit; cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .4; }
@@ -37,6 +38,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--gold-soft);
 .connection-dot { width: 7px; height: 7px; border-radius: 50%; background: #8a4f4c; box-shadow: 0 0 0 4px rgba(138,79,76,.13); }
 .connection-dot.online { background: #74d5aa; box-shadow: 0 0 0 4px rgba(116,213,170,.13); }
 .icon-button { display: grid; width: 33px; height: 33px; margin-left: 12px; place-items: center; border: 1px solid rgba(210,173,100,.25); border-radius: 50%; background: transparent; color: var(--gold-soft); font-size: 20px; }
+.account-button { max-width: 220px; overflow: hidden; padding: 7px 10px; border: 1px solid rgba(210,173,100,.35); border-radius: 20px; background: rgba(210,173,100,.08); color: var(--gold-soft); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 main { width: min(1240px, calc(100% - 48px)); margin: 0 auto; }
 .home-view { min-height: calc(100vh - 86px); display: grid; grid-template-columns: minmax(0, 1fr) 390px; align-items: center; gap: 8vw; padding: 55px 4vw 85px; }
 .hero-copy { max-width: 650px; }
@@ -192,6 +194,23 @@ main { width: min(1240px, calc(100% - 48px)); margin: 0 auto; }
 .toast { position: fixed; z-index: 50; right: 23px; bottom: 24px; max-width: min(360px, calc(100% - 46px)); padding: 13px 17px; border: 1px solid rgba(239,207,146,.4); border-radius: 3px; background: #173f3e; color: #f6e9ce; box-shadow: var(--shadow); font-size: 12px; opacity: 0; pointer-events: none; transform: translateY(10px); transition: opacity .2s, transform .2s; }
 .toast.visible { opacity: 1; transform: translateY(0); }
 .toast.error { border-color: rgba(242,120,107,.55); background: #4e2829; }
+.auth-backdrop { position: fixed; z-index: 60; inset: 0; background: rgba(2,10,11,.72); backdrop-filter: blur(6px); }
+.auth-panel { position: fixed; z-index: 61; top: 50%; left: 50%; width: min(420px, calc(100% - 32px)); padding: 30px; border: 1px solid rgba(239,207,146,.35); border-radius: 6px; background: linear-gradient(145deg, #183e3e, #071b1d); box-shadow: 0 30px 100px rgba(0,0,0,.5); transform: translate(-50%, -50%); }
+.auth-panel h2 { margin: 0; font-family: "Playfair Display", Georgia, serif; font-size: 32px; }
+.auth-close { position: absolute; top: 12px; right: 14px; width: 30px; height: 30px; border: 0; background: transparent; color: var(--muted); font-size: 25px; }
+.auth-lead { margin: 12px 0 20px; color: #a9c0b7; font-size: 12px; line-height: 1.5; }
+.auth-lead b { color: var(--gold-soft); }
+.auth-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 15px; padding: 4px; border-radius: 4px; background: rgba(0,0,0,.22); }
+.auth-tab { height: 35px; border: 0; border-radius: 3px; background: transparent; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.auth-tab.active { background: rgba(210,173,100,.18); color: var(--gold-soft); }
+.auth-form .field-label { margin-top: 12px; }
+.auth-form .primary-button { margin-top: 21px; }
+.auth-error { min-height: 17px; margin-top: 12px; color: #f28f83; font-size: 11px; }
+.account-summary { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px; margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(239,207,146,.15); }
+.account-summary > div { display: grid; gap: 5px; }
+.account-summary > div > b { color: var(--paper); font-size: 14px; }
+.account-summary > strong { color: var(--gold-soft); font-size: 16px; }
+.account-summary .compact { grid-column: 1 / -1; width: 100%; }
 @media (max-width: 800px) {
   .topbar, main { width: min(100% - 28px, 1240px); }
   .hub-view { min-height: calc(100vh - 70px); grid-template-columns: 1fr; gap: 32px; padding: 38px 0 54px; }
@@ -252,6 +271,7 @@ main { width: min(1240px, calc(100% - 48px)); margin: 0 auto; }
 @media (max-width: 450px) {
   .topbar { height: 70px; }
   .topbar-right { font-size: 0; }
+  .account-button { max-width: 130px; font-size: 9px; }
   .home-view { min-height: calc(100vh - 70px); padding-top: 35px; }
   .hub-view { min-height: calc(100vh - 70px); gap: 24px; padding-top: 30px; }
   .hub-intro h1 { font-size: 49px; }
