@@ -2,6 +2,14 @@
 
 A Cloudflare Workers game hub. The first game lives in [`tienlen/`](./tienlen/): a 2–4 player realtime Tiến Lên Miền Nam room game.
 
+## Routes
+
+- `/` — Game Room ecosystem hub.
+- `/tienlen` — Tiến Lên lobby.
+- `/tienlen/room/ABC123` — shareable Tiến Lên room link; opening it directly joins that room after the visitor enters a name.
+
+The frontend uses History API routing with Cloudflare SPA fallback, so refreshes and shared room URLs return the same app shell and resolve on the client.
+
 ## Deploy with Cloudflare Git
 
 - Repository: `chungbuild/game`

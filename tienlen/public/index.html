@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#071b1d" />
-    <meta name="description" content="Tiến Lên Miền Nam — phòng bài realtime cho 2–4 người." />
-    <title>Tiến Lên — Game Room</title>
+    <meta name="description" content="Game Room — hệ sinh thái minigame realtime để chơi cùng bạn bè." />
+    <title>Game Room — chơi cùng nhau</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
@@ -14,15 +14,21 @@
   <body>
     <div class="app-shell">
       <header class="topbar">
-        <a class="brand" href="/" aria-label="Game hub home"><span class="brand-mark">♠</span><span><b>GAME</b><small>ROOM</small></span></a>
+        <a class="brand" href="/" aria-label="Về Game Room hub"><span class="brand-mark">♠</span><span><b>GAME</b><small>ROOM</small></span></a>
         <div class="topbar-right"><span class="connection-dot" id="connectionDot"></span><span id="connectionText">Chưa kết nối</span><button class="icon-button" id="soundButton" type="button" aria-label="Bật tắt âm thanh">◖</button></div>
       </header>
 
       <main>
-        <section id="homeView" class="home-view">
+        <section id="hubView" class="hub-view">
+          <div class="hub-intro"><p class="eyebrow">MỘT NƠI ĐỂ CHƠI CÙNG NHAU</p><h1>Game Room<br /><em>chơi cùng nhau</em></h1><p class="hero-lead">Những trò chơi nhỏ cho những cuộc vui lớn.<br />Chọn một bàn, mời bạn bè và bắt đầu.</p><div class="hero-rule"><span></span><i>♣ ♦ ♥ ♠</i><span></span></div></div>
+          <div class="game-shelf"><div class="shelf-heading"><span class="mini-label">CÁC TRÒ CHƠI</span><span class="players-badge">GAME ROOM · 01</span></div><a class="game-tile featured" href="/tienlen"><div class="tile-art"><img src="/assets/cards/card-back.png" alt="" /><span class="tile-suit">♠</span></div><div class="tile-copy"><span class="tile-status live">ĐANG CHƠI ĐƯỢC</span><h2>Tiến Lên<br /><em>Miền Nam</em></h2><p>Phòng bài realtime cho 2–4 người.</p><span class="tile-cta">Vào sảnh <b>→</b></span></div></a><div class="game-tile upcoming"><div class="tile-art ghost"><span>+</span></div><div class="tile-copy"><span class="tile-status">SẮP RA MẮT</span><h2>Trò chơi<br /><em>tiếp theo</em></h2><p>Một chỗ mới đang được chuẩn bị.</p></div></div></div>
+        </section>
+
+        <section id="gameLobbyView" class="home-view hidden">
           <div class="hero-copy"><p class="eyebrow">PHÒNG BÀI TRỰC TUYẾN</p><h1>Tiến Lên<br /><em>Miền Nam</em></h1><p class="hero-lead">Một ván bài đẹp, nhanh và công bằng.<br />Mời bạn bè vào bàn bằng một mã phòng.</p><div class="hero-rule"><span></span><i>♣ ♦ ♥ ♠</i><span></span></div></div>
           <div class="lobby-card">
             <div class="lobby-card-header"><span class="mini-label">BẮT ĐẦU VÁN</span><span class="players-badge">2—4 NGƯỜI</span></div>
+            <div id="inviteNote" class="invite-note hidden"></div>
             <label class="field-label" for="playerName">Tên của bạn</label><input id="playerName" class="text-input" maxlength="18" placeholder="Nhập tên hiển thị" autocomplete="nickname" />
             <label class="field-label">Chọn chân dung</label><div class="avatar-picker" id="avatarPicker" role="radiogroup" aria-label="Chọn chân dung"></div>
             <button class="primary-button" id="createButton" type="button"><span>Tạo phòng mới</span><b>→</b></button>
@@ -33,7 +39,7 @@
         </section>
 
         <section id="roomView" class="room-view hidden">
-          <div class="room-head"><div><p class="eyebrow">PHÒNG <strong id="roomCodeLabel">—</strong></p><h2 id="roomTitle">Đang chờ người chơi</h2></div><div class="room-head-actions"><button class="ghost-button" id="copyRoomButton" type="button">Sao chép mã</button><button class="ghost-button danger" id="leaveButton" type="button">Rời phòng</button></div></div>
+          <div class="room-head"><div><p class="eyebrow">PHÒNG <strong id="roomCodeLabel">—</strong></p><h2 id="roomTitle">Đang chờ người chơi</h2></div><div class="room-head-actions"><button class="ghost-button" id="copyRoomButton" type="button">Sao chép link</button><button class="ghost-button danger" id="leaveButton" type="button">Rời phòng</button></div></div>
           <div class="table-scene">
             <div class="table-ambient"></div><div class="table-surface"><div class="table-inlay"></div><div class="table-center" id="tableCenter"><div class="turn-kicker" id="turnKicker">PHÒNG CHỜ</div><div class="last-play" id="lastPlay">Mời thêm người chơi để bắt đầu</div><div class="pile" id="pile"><img src="/assets/cards/card-back.png" alt="Bộ bài úp" /></div><div class="table-status" id="tableStatus">Chủ phòng có thể bắt đầu khi đủ người.</div></div></div>
             <div class="seat seat-top" id="seatTop"></div><div class="seat seat-left" id="seatLeft"></div><div class="seat seat-right" id="seatRight"></div><div class="seat seat-bottom" id="seatBottom"></div>

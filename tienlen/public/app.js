@@ -1,4 +1,5 @@
 import { cardRank, cardSort, cardSuit } from './engine.js';
+import { gamePath, parseRoute, roomPath } from './routes.js';
 
 const AVATARS = Array.from({ length: 8 }, (_, index) => `/assets/avatars/avatar-${String(index + 1).padStart(2, '0')}.png`);
 const SUIT_NAMES = { s: 'bích', c: 'chuồn', d: 'rô', h: 'cơ' };
@@ -17,7 +18,8 @@ const state = {
 localStorage.setItem('tienlen-player-id', state.playerId);
 
 const $ = (id) => document.getElementById(id);
-const homeView = $('homeView');
+const hubView = $('hubView');
+const gameLobbyView = $('gameLobbyView');
 const roomView = $('roomView');
 const playerName = $('playerName');
 const roomInput = $('roomInput');
@@ -25,6 +27,7 @@ const avatarPicker = $('avatarPicker');
 const toast = $('toast');
 const connectionDot = $('connectionDot');
 const connectionText = $('connectionText');
+const initialRoute = parseRoute(location.pathname);
 
 playerName.value = state.name;
 $('soundButton').textContent = state.sound ? '◖' : '◌';
@@ -50,9 +53,10 @@ function makeRoomCode() {
   return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
 }
 
-function connect(code) {
+function connect(code, { push = false } = {}) {
   state.roomCode = code.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
   if (!/^[A-Z0-9]{4,8}$/.test(state.roomCode)) return showToast('Mã phòng cần có 4–8 ký tự.', 'error');
+  history[push ? 'pushState' : 'replaceState']({}, '', roomPath(state.roomCode));
   if (state.socket) state.socket.close();
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const socket = new WebSocket(`${protocol}//${location.host}/api/room/${state.roomCode}`);
@@ -80,10 +84,48 @@ function handleMessage(message) {
   if (message.type !== 'state') return;
   state.room = message;
   state.selected.clear();
-  homeView.classList.add('hidden');
+  hubView.classList.add('hidden');
+  gameLobbyView.classList.add('hidden');
   roomView.classList.remove('hidden');
   $('roomCodeLabel').textContent = message.roomCode;
   renderRoom();
+}
+
+function showHub() {
+  state.socket?.close();
+  state.socket = null;
+  state.room = null;
+  state.roomCode = '';
+  hubView.classList.remove('hidden');
+  gameLobbyView.classList.add('hidden');
+  roomView.classList.add('hidden');
+  setConnection('Chưa kết nối');
+}
+
+function showGameLobby(roomCode = null) {
+  state.socket?.close();
+  state.socket = null;
+  state.room = null;
+  state.roomCode = '';
+  hubView.classList.add('hidden');
+  gameLobbyView.classList.remove('hidden');
+  roomView.classList.add('hidden');
+  setConnection('Chưa kết nối');
+  const inviteNote = $('inviteNote');
+  inviteNote.classList.toggle('hidden', !roomCode);
+  inviteNote.textContent = roomCode ? `Bạn được mời vào phòng ${roomCode}. Nhập tên rồi vào bàn.` : '';
+  if (roomCode) roomInput.value = roomCode;
+}
+
+function applyRoute(route = parseRoute(location.pathname)) {
+  if (route.page === 'hub') return showHub();
+  if (route.page === 'tienlen') {
+    showGameLobby(route.roomCode);
+    if (route.roomCode) connect(route.roomCode);
+    return;
+  }
+  showHub();
+  showToast('Trang này chưa tồn tại.', 'error');
 }
 
 function renderAvatarPicker() {
@@ -173,12 +215,12 @@ function renderHand(room, isTurn) {
 $('createButton').addEventListener('click', () => {
   state.name = playerName.value.trim().slice(0, 18) || 'Người chơi';
   localStorage.setItem('tienlen-name', state.name);
-  connect(makeRoomCode());
+  connect(makeRoomCode(), { push: true });
 });
 $('joinButton').addEventListener('click', () => {
   state.name = playerName.value.trim().slice(0, 18) || 'Người chơi';
   localStorage.setItem('tienlen-name', state.name);
-  connect(roomInput.value.trim());
+  connect(roomInput.value.trim(), { push: true });
 });
 roomInput.addEventListener('input', () => { roomInput.value = roomInput.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); });
 playerName.addEventListener('keydown', (event) => { if (event.key === 'Enter') $('createButton').click(); });
@@ -190,15 +232,13 @@ $('playButton').addEventListener('click', () => {
 });
 $('passButton').addEventListener('click', () => send({ type: 'pass' }));
 $('copyRoomButton').addEventListener('click', async () => {
-  await navigator.clipboard?.writeText(state.roomCode);
-  showToast(`Đã sao chép mã phòng ${state.roomCode}.`);
+  const link = `${location.origin}${roomPath(state.roomCode)}`;
+  await navigator.clipboard?.writeText(link);
+  showToast('Đã sao chép link mời bạn vào phòng.');
 });
 $('leaveButton').addEventListener('click', () => {
-  state.socket?.close();
-  state.room = null;
-  roomView.classList.add('hidden');
-  homeView.classList.remove('hidden');
-  setConnection('Chưa kết nối');
+  history.pushState({}, '', gamePath());
+  showGameLobby();
 });
 $('soundButton').addEventListener('click', () => {
   state.sound = !state.sound;
@@ -207,4 +247,10 @@ $('soundButton').addEventListener('click', () => {
 });
 
 renderAvatarPicker();
-setConnection('Chưa kết nối');
+document.querySelector('.brand').addEventListener('click', (event) => {
+  event.preventDefault();
+  history.pushState({}, '', '/');
+  showHub();
+});
+window.addEventListener('popstate', () => applyRoute());
+applyRoute(initialRoute);

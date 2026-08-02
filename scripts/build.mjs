@@ -1,11 +1,10 @@
-import { cp, mkdir, rm } from 'node:fs/promises';
+import { cp, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const source = join(process.cwd(), 'tienlen', 'public');
 const target = join(process.cwd(), 'dist');
-await rm(target, { recursive: true, force: true });
 await mkdir(target, { recursive: true });
-await cp(source, target, { recursive: true });
+await cp(source, target, { recursive: true, force: true });
 console.log(`Built Tiến Lên into ${target}`);
 
 const assetRoot = join(target, 'assets');
