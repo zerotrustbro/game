@@ -98,6 +98,13 @@ test('room assigns canonical player ids instead of trusting client collisions', 
   await room.start(attacker);
   assert.equal(room.room.phase, 'lobby');
   assert.equal(attacker.socket.messages.at(-1).type, 'error');
+
+  await room.start(host);
+  const roundId = room.room.roundId;
+  await room.start(host);
+  assert.equal(room.room.phase, 'game');
+  assert.equal(room.room.roundId, roundId);
+  assert.equal(host.socket.messages.at(-1).type, 'error');
 });
 
 test('public auth proxy cannot expose internal account routes or headers', async () => {

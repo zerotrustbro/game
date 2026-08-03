@@ -284,6 +284,7 @@ export class Room {
 
   async start(session) {
     if (!this.isKnown(session) || this.room.hostId !== session.playerId) return this.error(session, 'Chỉ chủ phòng mới có thể bắt đầu.');
+    if (this.room.phase !== 'lobby') return this.error(session, 'Ván đang diễn ra.');
     if (this.room.players.length < 2) return this.error(session, 'Cần ít nhất 2 người để bắt đầu.');
     if (!this.canAffordRound()) return this.error(session, `Mỗi người cần ít nhất ${LOSS_PENALTY} xu để bắt đầu.`);
     await this.beginRound();
