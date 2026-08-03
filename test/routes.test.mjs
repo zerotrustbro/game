@@ -1,9 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { gamePath, parseRoute, roomPath } from '../tienlen/public/routes.js';
+import { ROOM_CODES, gamePath, parseRoute, roomPath } from '../tienlen/public/routes.js';
 
 test('builds a shareable room path', () => {
   assert.equal(roomPath('abc123'), '/tienlen/room/ABC123');
+});
+
+test('exposes five fixed tables for the Tiến Lên lobby', () => {
+  assert.deepEqual(ROOM_CODES, ['BAN01', 'BAN02', 'BAN03', 'BAN04', 'BAN05']);
 });
 
 test('parses ecosystem, game lobby, and room routes', () => {

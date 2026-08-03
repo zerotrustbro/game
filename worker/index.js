@@ -1,5 +1,6 @@
 import { dealGame, passMove, playMove } from '../tienlen/public/engine.js';
 import { settleCoins, STARTING_COINS, LOSS_PENALTY } from '../tienlen/public/economy.js';
+import { ROOM_CODES } from '../tienlen/public/routes.js';
 
 const MAX_PLAYERS = 4;
 const SESSION_DAYS = 30;
@@ -31,6 +32,60 @@ function cleanAvatar(value) {
 function roomCode(pathname) {
   const match = pathname.match(/^\/api\/room\/([A-Z0-9]{4,8})$/);
   return match?.[1] || null;
+}
+
+const PLAYER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function emptyRoom() {
+  return { phase: 'lobby', hostId: null, players: [], game: null, roomCode: null, roundId: null, settlement: null };
+}
+
+function normalizeRoom(saved) {
+  if (!saved || typeof saved !== 'object') return { room: emptyRoom(), changed: false };
+  const room = { ...emptyRoom(), ...saved };
+  let changed = false;
+  const usedIds = new Set();
+  const canonicalByOriginal = new Map();
+  const savedPlayers = Array.isArray(saved.players) ? saved.players : [];
+  const players = savedPlayers.map((player = {}) => {
+    const originalId = player.id;
+    let id = typeof originalId === 'string' && PLAYER_ID_PATTERN.test(originalId) && !usedIds.has(originalId) ? originalId : crypto.randomUUID();
+    while (usedIds.has(id)) id = crypto.randomUUID();
+    if (typeof originalId === 'string' && !canonicalByOriginal.has(originalId)) canonicalByOriginal.set(originalId, id);
+    usedIds.add(id);
+    if (id !== originalId) changed = true;
+    return { ...player, id };
+  });
+  if (!Array.isArray(saved.players)) changed = true;
+  room.players = players;
+
+  const hostId = canonicalByOriginal.get(saved.hostId) || players[0]?.id || null;
+  if (room.hostId !== hostId) changed = true;
+  room.hostId = hostId;
+
+  if (saved.game && typeof saved.game === 'object') {
+    const game = { ...saved.game };
+    const savedGamePlayers = Array.isArray(saved.game.players) ? saved.game.players : [];
+    game.players = savedGamePlayers.map((player = {}, index) => {
+      const member = player.accountId ? players.find((candidate) => candidate.accountId === player.accountId) : players[index];
+      const id = member?.id || canonicalByOriginal.get(player.id) || player.id;
+      if (id !== player.id) changed = true;
+      return { ...player, id };
+    });
+    if (game.winner) {
+      const winner = canonicalByOriginal.get(game.winner) || game.players.find((player) => player.id === game.winner)?.id || game.winner;
+      if (winner !== game.winner) changed = true;
+      game.winner = winner;
+    }
+    if (game.currentPlay?.playerId) {
+      const playerId = canonicalByOriginal.get(game.currentPlay.playerId) || game.currentPlay.playerId;
+      if (playerId !== game.currentPlay.playerId) changed = true;
+      game.currentPlay = { ...game.currentPlay, playerId };
+    }
+    room.game = game;
+  }
+
+  return { room, changed };
 }
 
 function encodeBase64(bytes) {
@@ -219,14 +274,20 @@ export class Room {
     this.sockets = new Map();
     this.room = null;
     this.queue = Promise.resolve();
-    this.ready = state.storage.get('room').then((saved) => {
-      this.room = saved || { phase: 'lobby', hostId: null, players: [], game: null, roomCode: null, roundId: null, settlement: null };
+    this.ready = state.storage.get('room').then(async (saved) => {
+      const normalized = normalizeRoom(saved);
+      this.room = normalized.room;
+      if (normalized.changed) await state.storage.put('room', this.room);
     });
   }
 
   async fetch(request) {
     await this.ready;
-    this.room.roomCode = roomCode(new URL(request.url).pathname) || this.room.roomCode;
+    const url = new URL(request.url);
+    if (url.pathname === '/summary' && request.method === 'GET' && request.headers.get('x-internal-room') === '1') {
+      return json(this.summary(url.searchParams.get('code') || this.room.roomCode, request.headers.get('x-account-id')));
+    }
+    this.room.roomCode = roomCode(url.pathname) || this.room.roomCode;
     if (request.headers.get('Upgrade') !== 'websocket') return json({ error: 'WebSocket required' }, 426);
     const accountId = request.headers.get('x-account-id');
     if (!accountId) return json({ error: 'Bạn cần đăng nhập để chơi.' }, 401);
@@ -242,6 +303,12 @@ export class Room {
     server.addEventListener('error', () => this.onClose(session));
     server.send(JSON.stringify({ type: 'connected' }));
     return new Response(null, { status: 101, webSocket: client });
+  }
+
+  summary(code, accountId) {
+    const existing = accountId && this.room.players.some((player) => player.accountId === accountId);
+    const players = this.room.players.length;
+    return { code, players, maxPlayers: MAX_PLAYERS, phase: this.room.phase, canJoin: Boolean(existing) || (this.room.phase !== 'game' && players < MAX_PLAYERS) };
   }
 
   async onMessage(session, raw) {
@@ -353,6 +420,7 @@ export class Room {
       this.room.settlement = { status: 'complete', reference, penalty: result.penalty, changes: result.changes.map((change) => ({ playerId: accountToPlayer.get(change.userId), amount: change.amount })) };
       for (const player of this.room.players) if (result.balances[player.accountId] !== undefined) player.coins = result.balances[player.accountId];
       for (const socket of this.sockets.values()) if (result.balances[socket.account.id] !== undefined) socket.account.coins = result.balances[socket.account.id];
+      await this.save();
       return true;
     } catch (error) {
       this.room.settlement = { status: 'failed', reference, penalty: LOSS_PENALTY, changes: [] };
@@ -405,6 +473,18 @@ export class Room {
   async save() { await this.state.storage.put('room', this.room); }
 }
 
+async function roomSummary(env, code, accountId) {
+  const headers = new Headers({ 'x-internal-room': '1' });
+  if (accountId) headers.set('x-account-id', accountId);
+  try {
+    const response = await env.ROOMS.get(env.ROOMS.idFromName(code)).fetch(new Request(`https://room/summary?code=${code}`, { headers }));
+    if (response.ok) return response.json();
+  } catch {
+    // Report an unavailable table as non-joinable instead of exposing a broken entry.
+  }
+  return { code, players: 0, maxPlayers: MAX_PLAYERS, phase: 'unavailable', canJoin: false };
+}
+
 async function accountForRequest(request, env) {
   const id = env.ACCOUNTS.idFromName('global');
   const response = await env.ACCOUNTS.get(id).fetch(new Request('https://accounts/resolve', { headers: { cookie: request.headers.get('cookie') || '', 'x-internal-account': '1' } }));
@@ -423,6 +503,11 @@ export default {
       const headers = new Headers(request.headers);
       headers.delete('x-internal-account');
       return env.ACCOUNTS.get(env.ACCOUNTS.idFromName('global')).fetch(new Request(target, { method: request.method, headers, body: request.method === 'GET' || request.method === 'HEAD' ? undefined : request.body }));
+    }
+    if (url.pathname === '/api/rooms' && request.method === 'GET') {
+      const account = request.headers.get('cookie') ? await accountForRequest(request, env) : null;
+      const rooms = await Promise.all(ROOM_CODES.map((code) => roomSummary(env, code, account?.id || null)));
+      return json({ rooms });
     }
     if (url.pathname === '/api/health') return json({ ok: true, service: 'game', game: 'tienlen' });
     const code = roomCode(url.pathname);

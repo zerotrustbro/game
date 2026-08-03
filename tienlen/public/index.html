@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css?v=layout-3" />
+    <link rel="stylesheet" href="/styles.css?v=lobby-1" />
   </head>
   <body>
     <div class="app-shell">
@@ -25,21 +25,19 @@
         </section>
 
         <section id="gameLobbyView" class="home-view hidden">
-          <div class="hero-copy"><p class="eyebrow">PHÒNG BÀI TRỰC TUYẾN</p><h1>Tiến Lên<br /><em>Miền Nam</em></h1><p class="hero-lead">Một ván bài đẹp, nhanh và công bằng.<br />Mời bạn bè vào bàn bằng một mã phòng.</p><div class="hero-rule"><span></span><i>♣ ♦ ♥ ♠</i><span></span></div></div>
+          <div class="hero-copy"><p class="eyebrow">PHÒNG BÀI TRỰC TUYẾN</p><h1>Tiến Lên<br /><em>Miền Nam</em></h1><p class="hero-lead">Chọn một trong năm bàn đang mở.<br />Bàn đã bắt đầu sẽ khóa người chơi mới.</p><div class="hero-rule"><span></span><i>♣ ♦ ♥ ♠</i><span></span></div></div>
           <div class="lobby-card">
-            <div class="lobby-card-header"><span class="mini-label">BẮT ĐẦU VÁN</span><span class="players-badge">2—4 NGƯỜI</span></div>
+            <div class="lobby-card-header"><span class="mini-label">CHỌN BÀN</span><span class="players-badge">5 BÀN · 2—4 NGƯỜI</span></div>
             <div id="inviteNote" class="invite-note hidden"></div>
             <label class="field-label" for="playerName">Tên của bạn</label><input id="playerName" class="text-input" maxlength="18" placeholder="Nhập tên hiển thị" autocomplete="nickname" />
             <label class="field-label">Chọn chân dung</label><div class="avatar-picker" id="avatarPicker" role="radiogroup" aria-label="Chọn chân dung"></div>
-            <button class="primary-button" id="createButton" type="button"><span>Tạo phòng mới</span><b>→</b></button>
-            <div class="divider"><span>hoặc tham gia phòng</span></div>
-            <div class="join-row"><input id="roomInput" class="text-input room-input" maxlength="8" placeholder="MÃ PHÒNG" autocomplete="off" /><button class="secondary-button" id="joinButton" type="button">Vào bàn</button></div>
-            <p class="form-note" id="homeMessage">Đăng nhập để nhận diện người chơi và dùng chung ví xu.</p>
+            <div id="roomList" class="room-list" aria-live="polite"><p class="room-list-loading">Đang tải danh sách bàn…</p></div>
+            <p class="form-note" id="homeMessage">Bàn trống nhận người chơi mới. Khi ván bắt đầu, bàn sẽ khóa.</p>
           </div>
         </section>
 
         <section id="roomView" class="room-view hidden">
-          <div class="room-head"><div><p class="eyebrow">PHÒNG <strong id="roomCodeLabel">—</strong></p><h2 id="roomTitle">Đang chờ người chơi</h2></div><div class="room-head-actions"><button class="ghost-button" id="copyRoomButton" type="button">Sao chép link</button><button class="ghost-button danger" id="leaveButton" type="button">Rời phòng</button></div></div>
+          <div class="room-head"><div><p class="eyebrow">PHÒNG <strong id="roomCodeLabel">—</strong></p><h2 id="roomTitle">Đang chờ người chơi</h2></div><div class="room-head-actions"><button class="ghost-button danger" id="leaveButton" type="button">Rời phòng</button></div></div>
           <div class="table-scene">
           <div class="table-ambient"></div><div class="table-surface"><div class="table-inlay"></div><div class="table-center" id="tableCenter"><div class="turn-kicker" id="turnKicker">PHÒNG CHỜ</div><div class="last-play" id="lastPlay">Mời thêm người chơi để bắt đầu</div><div class="pile" id="pile"><img src="/assets/cards/card-back.webp" alt="Bộ bài úp" /></div><div class="table-status" id="tableStatus">Chủ phòng có thể bắt đầu khi đủ người.</div></div></div>
             <div class="seat seat-top" id="seatTop"></div><div class="seat seat-left" id="seatLeft"></div><div class="seat seat-right" id="seatRight"></div><div class="seat seat-bottom" id="seatBottom"></div>
@@ -61,6 +59,6 @@
       </section>
       <div class="toast" id="toast" role="status"></div>
     </div>
-    <script type="module" src="/app.js?v=opt-1"></script>
+    <script type="module" src="/app.js?v=lobby-1"></script>
   </body>
 </html>

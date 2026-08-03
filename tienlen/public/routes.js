@@ -1,3 +1,4 @@
+export const ROOM_CODES = Object.freeze(['BAN01', 'BAN02', 'BAN03', 'BAN04', 'BAN05']);
 const ROOM_PATTERN = /^[A-Z0-9]{4,8}$/;
 
 export function roomPath(code) {

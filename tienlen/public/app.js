@@ -12,6 +12,7 @@ const state = {
   name: localStorage.getItem('tienlen-name') || '',
   avatar: Number(localStorage.getItem('tienlen-avatar') || 1),
   room: null,
+  rooms: [],
   user: null,
   selected: new Set(),
   sound: localStorage.getItem('tienlen-sound') !== 'off',
@@ -22,8 +23,8 @@ const hubView = $('hubView');
 const gameLobbyView = $('gameLobbyView');
 const roomView = $('roomView');
 const playerName = $('playerName');
-const roomInput = $('roomInput');
 const avatarPicker = $('avatarPicker');
+const roomList = $('roomList');
 const toast = $('toast');
 const connectionDot = $('connectionDot');
 const connectionText = $('connectionText');
@@ -83,6 +84,36 @@ async function authRequest(path, body) {
   return data.user;
 }
 
+function renderRoomList() {
+  if (!state.rooms.length) {
+    roomList.innerHTML = '<p class="room-list-loading">Chưa tải được danh sách bàn. Thử tải lại trang.</p>';
+    return;
+  }
+  roomList.innerHTML = state.rooms.map((table, index) => {
+    const players = Math.max(0, Number(table.players) || 0);
+    const maxPlayers = Math.max(2, Number(table.maxPlayers) || 4);
+    const canJoin = Boolean(table.canJoin);
+    const status = table.phase === 'unavailable'
+      ? 'TẠM LỖI'
+      : table.phase === 'game'
+        ? (canJoin ? 'VÀO LẠI' : 'ĐANG CHƠI')
+        : players >= maxPlayers ? 'ĐỦ NGƯỜI' : 'CÒN CHỖ';
+    return `<button class="room-choice ${canJoin ? '' : 'locked'}" type="button" data-room-code="${esc(table.code)}" ${canJoin ? '' : 'disabled'}><span class="room-choice-index">0${index + 1}</span><span class="room-choice-copy"><b>Bàn ${index + 1}</b><small>${players}/${maxPlayers} người · ${table.phase === 'game' ? 'ván đang diễn ra' : 'đang chờ'}</small></span><span class="room-choice-status">${status}</span></button>`;
+  }).join('');
+}
+
+async function loadRooms() {
+  try {
+    const response = await fetch('/api/rooms', { cache: 'no-store' });
+    if (!response.ok) throw new Error('room list unavailable');
+    const data = await response.json();
+    state.rooms = Array.isArray(data.rooms) ? data.rooms : [];
+  } catch {
+    state.rooms = [];
+  }
+  renderRoomList();
+}
+
 async function loadAccount() {
   try {
     const response = await fetch('/api/auth/me');
@@ -91,19 +122,13 @@ async function loadAccount() {
     // An unavailable auth endpoint should leave the visitor in guest mode.
   }
   updateAccountUi();
+  await loadRooms();
   if (state.user && pendingRoomCode) {
     const code = pendingRoomCode;
     pendingRoomCode = null;
     closeAuth();
     connect(code);
   }
-}
-
-function makeRoomCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  const randomBytes = new Uint8Array(6);
-  crypto.getRandomValues(randomBytes);
-  return Array.from(randomBytes, (value) => chars[value % chars.length]).join('');
 }
 
 function connect(code, { push = false } = {}) {
@@ -149,7 +174,6 @@ function handleMessage(message) {
   if (message.type !== 'state') return;
   if (message.you) {
     state.playerId = message.you;
-    localStorage.setItem('tienlen-player-id', state.playerId);
   }
   state.room = message;
   state.selected.clear();
@@ -182,8 +206,8 @@ function showGameLobby(roomCode = null) {
   setConnection('Chưa kết nối');
   const inviteNote = $('inviteNote');
   inviteNote.classList.toggle('hidden', !roomCode);
-  inviteNote.textContent = roomCode ? `Bạn được mời vào phòng ${roomCode}. Nhập tên rồi vào bàn.` : '';
-  if (roomCode) roomInput.value = roomCode;
+  inviteNote.textContent = roomCode ? `Bạn được mời vào phòng ${roomCode}. Nhập tên rồi chọn bàn ${roomCode}.` : '';
+  renderRoomList();
 }
 
 function applyRoute(route = parseRoute(location.pathname)) {
@@ -275,11 +299,6 @@ function renderHand(room, isTurn) {
   $('selectionHint').textContent = room.gameOver ? 'Ván đã kết thúc.' : isTurn ? (state.selected.size ? `${state.selected.size} lá đã chọn · sắp xếp theo luật miền Nam` : 'Chọn một hoặc nhiều lá để đánh.') : 'Đợi đến lượt bạn.';
 }
 
-$('createButton').addEventListener('click', () => {
-  state.name = playerName.value.trim().slice(0, 18) || 'Người chơi';
-  localStorage.setItem('tienlen-name', state.name);
-  connect(makeRoomCode(), { push: true });
-});
 avatarPicker.addEventListener('click', (event) => {
   const button = event.target.closest('[data-avatar]');
   if (!button) return;
@@ -295,13 +314,14 @@ $('hand').addEventListener('click', (event) => {
   state.selected.has(card) ? state.selected.delete(card) : state.selected.add(card);
   renderHand(room, true);
 });
-$('joinButton').addEventListener('click', () => {
+roomList.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-room-code]');
+  if (!button || button.disabled) return;
   state.name = playerName.value.trim().slice(0, 18) || 'Người chơi';
   localStorage.setItem('tienlen-name', state.name);
-  connect(roomInput.value.trim(), { push: true });
+  connect(button.dataset.roomCode, { push: true });
 });
-roomInput.addEventListener('input', () => { roomInput.value = roomInput.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); });
-playerName.addEventListener('keydown', (event) => { if (event.key === 'Enter') $('createButton').click(); });
+playerName.addEventListener('keydown', (event) => { if (event.key === 'Enter') roomList.querySelector('.room-choice:not(:disabled)')?.click(); });
 $('startButton').addEventListener('click', () => send({ type: 'start' }));
 $('rematchButton').addEventListener('click', () => send({ type: 'restart' }));
 $('playButton').addEventListener('click', () => {
@@ -309,16 +329,7 @@ $('playButton').addEventListener('click', () => {
   send({ type: 'play', cards });
 });
 $('passButton').addEventListener('click', () => send({ type: 'pass' }));
-$('copyRoomButton').addEventListener('click', async () => {
-  const link = `${location.origin}${roomPath(state.roomCode)}`;
-  try {
-    if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
-    await navigator.clipboard.writeText(link);
-    showToast('Đã sao chép link mời bạn vào phòng.');
-  } catch {
-    showToast('Không thể sao chép link trên thiết bị này.', 'error');
-  }
-});
+
 $('leaveButton').addEventListener('click', () => {
   history.pushState({}, '', gamePath());
   showGameLobby();
@@ -345,6 +356,7 @@ async function finishAuth(user) {
   state.name = user.displayName;
   localStorage.setItem('tienlen-name', state.name);
   updateAccountUi();
+  await loadRooms();
   closeAuth();
   if (pendingRoomCode) { const code = pendingRoomCode; pendingRoomCode = null; connect(code); }
 }
@@ -364,12 +376,16 @@ $('logoutButton').addEventListener('click', async () => {
   state.socket?.close();
   state.socket = null;
   updateAccountUi();
+  await loadRooms();
   closeAuth();
   showHub();
 });
 
 renderAvatarPicker();
 loadAccount();
+setInterval(() => {
+  if (!gameLobbyView.classList.contains('hidden')) loadRooms();
+}, 5000);
 document.querySelector('.brand').addEventListener('click', (event) => {
   event.preventDefault();
   history.pushState({}, '', '/');
