@@ -2,6 +2,14 @@ const RANKS = ['3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A', '2']
 const SUITS = ['s', 'c', 'd', 'h']; // bích, chuồn, rô, cơ
 const SUIT_ORDER = Object.fromEntries(SUITS.map((suit, index) => [suit, index]));
 const RANK_VALUE = Object.fromEntries(RANKS.map((rank, index) => [rank, index]));
+const COMBO_NAMES = Object.freeze({
+  single: 'Lá lẻ',
+  pair: 'Đôi',
+  triple: 'Sám',
+  straight: 'Sảnh',
+  four: 'Tứ quý',
+  pairseq: 'Đôi thông',
+});
 
 export const CARD_RANKS = RANKS;
 export const CARD_SUITS = SUITS;
@@ -102,7 +110,7 @@ export function createGame(players, options = {}) {
     mustStart: options.mustStart ?? false,
     gameOver: false,
     winner: null,
-    startedAt: options.startedAt || Date.now(),
+    startedAt: options.startedAt ?? Date.now(),
   };
 }
 
@@ -137,7 +145,8 @@ export function playMove(game, playerId, cards) {
   }
 
   const next = structuredClone(game);
-  next.players[index].hand = player.hand.filter((card) => !cards.includes(card)).sort(cardSort);
+  const selectedCards = new Set(cards);
+  next.players[index].hand = player.hand.filter((card) => !selectedCards.has(card)).sort(cardSort);
   next.currentPlay = { playerId, combo, cards: [...combo.cards] };
   next.passCount = 0;
   next.mustStart = false;
@@ -172,10 +181,7 @@ export function passMove(game, playerId) {
 }
 
 export function describeComboForUi(combo) {
-  const names = {
-    single: 'Lá lẻ', pair: 'Đôi', triple: 'Sám', straight: 'Sảnh', four: 'Tứ quý', pairseq: 'Đôi thông',
-  };
-  return names[combo?.type] || 'Bộ bài';
+  return COMBO_NAMES[combo?.type] || 'Bộ bài';
 }
 
 export const describeComboName = describeComboForUi;

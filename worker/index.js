@@ -3,6 +3,9 @@ import { settleCoins, STARTING_COINS, LOSS_PENALTY } from '../tienlen/public/eco
 
 const MAX_PLAYERS = 4;
 const SESSION_DAYS = 30;
+const SECONDS_PER_DAY = 86400;
+const SESSION_MAX_AGE = SESSION_DAYS * SECONDS_PER_DAY;
+const SESSION_TTL = SESSION_MAX_AGE * 1000;
 
 function json(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), {
@@ -62,14 +65,26 @@ async function passwordHash(password, salt) {
 }
 
 function parseCookies(request) {
-  return Object.fromEntries((request.headers.get('cookie') || '').split(';').map((part) => {
+  const cookies = {};
+  for (const part of (request.headers.get('cookie') || '').split(';')) {
     const index = part.indexOf('=');
-    return index < 0 ? ['', ''] : [part.slice(0, index).trim(), decodeURIComponent(part.slice(index + 1).trim())];
-  }).filter(([key]) => key));
+    if (index < 0) continue;
+    const key = part.slice(0, index).trim();
+    if (!key) continue;
+    try {
+      cookies[key] = decodeURIComponent(part.slice(index + 1).trim());
+    } catch {
+      // Ignore malformed cookies instead of failing the whole request.
+    }
+  }
+  return cookies;
 }
 
-function sessionCookie(request, token, maxAge = SESSION_DAYS * 86400) {
-  return `game_session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`;
+function sessionCookie(request, token, maxAge = SESSION_MAX_AGE) {
+  const url = new URL(request.url);
+  const protocol = url.searchParams.get('client_proto') || url.protocol;
+  const secure = protocol === 'https:' ? '; Secure' : '';
+  return `game_session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax${secure}; Max-Age=${maxAge}`;
 }
 
 function publicUser(user) {
@@ -137,7 +152,7 @@ export class AccountStore {
   async issueSession(request, user, status = 200) {
     const token = randomToken();
     const tokenHash = await sha256(token);
-    this.data.sessions[tokenHash] = { userId: user.id, expiresAt: Date.now() + SESSION_DAYS * 86400000 };
+    this.data.sessions[tokenHash] = { userId: user.id, expiresAt: Date.now() + SESSION_TTL };
     await this.save();
     return json({ user: publicUser(user) }, status, { 'set-cookie': sessionCookie(request, token) });
   }
@@ -180,18 +195,12 @@ export class AccountStore {
     if (this.data.ledger[reference]) return json(this.data.ledger[reference]);
     const winner = this.data.users[winnerId];
     if (!winner || loserIds.some((id) => !this.data.users[id])) return json({ error: 'Unknown account in settlement.' }, 400);
-    const changes = [];
-    let collected = 0;
-    for (const loserId of loserIds) {
-      const loser = this.data.users[loserId];
-      const amount = -Math.min(LOSS_PENALTY, Math.max(0, loser.coins));
-      loser.coins += amount;
-      collected -= amount;
-      changes.push({ userId: loserId, amount });
-    }
-    winner.coins += collected;
-    changes.push({ userId: winnerId, amount: collected });
-    const result = { ok: true, reference, penalty: LOSS_PENALTY, changes, balances: Object.fromEntries([...new Set([winnerId, ...loserIds])].map((id) => [id, this.data.users[id].coins])) };
+    const accountIds = [...new Set([winnerId, ...loserIds])];
+    const balances = Object.fromEntries(accountIds.map((id) => [id, this.data.users[id].coins]));
+    const settled = settleCoins(balances, winnerId, loserIds, LOSS_PENALTY);
+    if (!settled.ok) return json({ error: 'Unable to settle accounts.' }, 500);
+    for (const id of accountIds) this.data.users[id].coins = settled.balances[id];
+    const result = { ok: true, reference, penalty: LOSS_PENALTY, changes: settled.changes, balances: settled.balances };
     this.data.ledger[reference] = result;
     await this.save();
     return json(result);
@@ -275,14 +284,8 @@ export class Room {
   async start(session) {
     if (!this.isKnown(session) || this.room.hostId !== session.playerId) return this.error(session, 'Chỉ chủ phòng mới có thể bắt đầu.');
     if (this.room.players.length < 2) return this.error(session, 'Cần ít nhất 2 người để bắt đầu.');
-    if (this.room.players.some((player) => player.coins < LOSS_PENALTY)) return this.error(session, `Mỗi người cần ít nhất ${LOSS_PENALTY} xu để bắt đầu.`);
-    const players = this.room.players.map(({ id, accountId, username, name, avatar }) => ({ id, accountId, username, name, avatar }));
-    this.room.game = dealGame(players);
-    this.room.roundId = crypto.randomUUID();
-    this.room.settlement = null;
-    this.room.phase = 'game';
-    await this.save();
-    this.broadcastState();
+    if (!this.canAffordRound()) return this.error(session, `Mỗi người cần ít nhất ${LOSS_PENALTY} xu để bắt đầu.`);
+    await this.beginRound();
   }
 
   async play(session, cards) {
@@ -307,9 +310,20 @@ export class Room {
   async restart(session) {
     if (!this.isKnown(session) || this.room.hostId !== session.playerId) return this.error(session, 'Chỉ chủ phòng mới có thể chơi ván mới.');
     if (!this.room.game?.gameOver) return this.error(session, 'Ván hiện tại chưa kết thúc.');
-    if (this.room.players.some((player) => player.coins < LOSS_PENALTY)) return this.error(session, `Mỗi người cần ít nhất ${LOSS_PENALTY} xu để chơi tiếp.`);
-    const players = this.room.players.map(({ id, accountId, username, name, avatar }) => ({ id, accountId, username, name, avatar }));
-    this.room.game = dealGame(players);
+    if (!this.canAffordRound()) return this.error(session, `Mỗi người cần ít nhất ${LOSS_PENALTY} xu để chơi tiếp.`);
+    await this.beginRound();
+  }
+
+  gamePlayers() {
+    return this.room.players.map(({ id, accountId, username, name, avatar }) => ({ id, accountId, username, name, avatar }));
+  }
+
+  canAffordRound() {
+    return !this.room.players.some((player) => player.coins < LOSS_PENALTY);
+  }
+
+  async beginRound() {
+    this.room.game = dealGame(this.gamePlayers());
     this.room.roundId = crypto.randomUUID();
     this.room.settlement = null;
     this.room.phase = 'game';
@@ -339,7 +353,13 @@ export class Room {
       if (player && !stillConnected) {
         player.connected = false;
         if (this.room.hostId === session.playerId) this.room.hostId = this.room.players.find((item) => item.connected)?.id || null;
-        this.save().then(() => this.broadcastState());
+        this.queue = this.queue
+          .catch((error) => console.error('Room queue failed:', error))
+          .then(async () => {
+            await this.save();
+            this.broadcastState();
+          })
+          .catch((error) => console.error('Room close persistence failed:', error));
       }
     }
   }
@@ -349,12 +369,14 @@ export class Room {
 
   viewFor(playerId, action) {
     const game = this.room.game;
+    const gamePlayers = new Map(game?.players.map((player) => [player.id, player]));
     const players = this.room.players.map((member) => {
-      const gamePlayer = game?.players.find((player) => player.id === member.id);
+      const gamePlayer = gamePlayers.get(member.id);
       return { id: member.id, username: member.username, name: member.name, avatar: member.avatar, connected: member.connected, handCount: gamePlayer?.hand.length ?? 0, hand: member.id === playerId ? (gamePlayer?.hand || []) : undefined };
     });
     const settlement = this.room.settlement ? { penalty: this.room.settlement.penalty, changes: this.room.settlement.changes } : null;
-    return { type: 'state', you: playerId, phase: this.room.phase, roomCode: this.room.roomCode, hostId: this.room.hostId, players, turnPlayerId: game ? game.players[game.turnIndex]?.id : null, currentPlay: game?.currentPlay || null, gameOver: game?.gameOver || false, winner: game?.winner || null, wallet: this.sockets.get([...this.sockets.entries()].find(([, item]) => item.playerId === playerId)?.[0])?.account.coins ?? null, settlement, action: action || null };
+    const session = [...this.sockets.values()].find((item) => item.playerId === playerId);
+    return { type: 'state', you: playerId, phase: this.room.phase, roomCode: this.room.roomCode, hostId: this.room.hostId, players, turnPlayerId: game ? game.players[game.turnIndex]?.id : null, currentPlay: game?.currentPlay || null, gameOver: game?.gameOver || false, winner: game?.winner || null, wallet: session?.account.coins ?? null, settlement, action: action || null };
   }
 
   broadcastState(action = null) { for (const session of this.sockets.values()) if (session.playerId) this.send(session.socket, this.viewFor(session.playerId, action)); }

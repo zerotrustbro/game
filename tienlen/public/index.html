@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css?v=layout-2" />
+    <link rel="stylesheet" href="/styles.css?v=layout-3" />
   </head>
   <body>
     <div class="app-shell">
@@ -21,7 +21,7 @@
       <main>
         <section id="hubView" class="hub-view">
           <div class="hub-intro"><p class="eyebrow">MỘT NƠI ĐỂ CHƠI CÙNG NHAU</p><h1>Game Room<br /><em>chơi cùng nhau</em></h1><p class="hero-lead">Những trò chơi nhỏ cho những cuộc vui lớn.<br />Chọn một bàn, mời bạn bè và bắt đầu.</p><div class="hero-rule"><span></span><i>♣ ♦ ♥ ♠</i><span></span></div></div>
-          <div class="game-shelf"><div class="shelf-heading"><span class="mini-label">CÁC TRÒ CHƠI</span><span class="players-badge">GAME ROOM · 01</span></div><a class="game-tile featured" href="/tienlen"><div class="tile-art"><img src="/assets/cards/card-back.png" alt="" /><span class="tile-suit">♠</span></div><div class="tile-copy"><span class="tile-status live">ĐANG CHƠI ĐƯỢC</span><h2>Tiến Lên<br /><em>Miền Nam</em></h2><p>Phòng bài realtime cho 2–4 người.</p><span class="tile-cta">Vào sảnh <b>→</b></span></div></a><div class="game-tile upcoming"><div class="tile-art ghost"><span>+</span></div><div class="tile-copy"><span class="tile-status">SẮP RA MẮT</span><h2>Trò chơi<br /><em>tiếp theo</em></h2><p>Một chỗ mới đang được chuẩn bị.</p></div></div></div>
+          <div class="game-shelf"><div class="shelf-heading"><span class="mini-label">CÁC TRÒ CHƠI</span><span class="players-badge">GAME ROOM · 01</span></div><a class="game-tile featured" href="/tienlen"><div class="tile-art"><img src="/assets/cards/card-back.webp" alt="" /><span class="tile-suit">♠</span></div><div class="tile-copy"><span class="tile-status live">ĐANG CHƠI ĐƯỢC</span><h2>Tiến Lên<br /><em>Miền Nam</em></h2><p>Phòng bài realtime cho 2–4 người.</p><span class="tile-cta">Vào sảnh <b>→</b></span></div></a><div class="game-tile upcoming"><div class="tile-art ghost"><span>+</span></div><div class="tile-copy"><span class="tile-status">SẮP RA MẮT</span><h2>Trò chơi<br /><em>tiếp theo</em></h2><p>Một chỗ mới đang được chuẩn bị.</p></div></div></div>
         </section>
 
         <section id="gameLobbyView" class="home-view hidden">
@@ -41,7 +41,7 @@
         <section id="roomView" class="room-view hidden">
           <div class="room-head"><div><p class="eyebrow">PHÒNG <strong id="roomCodeLabel">—</strong></p><h2 id="roomTitle">Đang chờ người chơi</h2></div><div class="room-head-actions"><button class="ghost-button" id="copyRoomButton" type="button">Sao chép link</button><button class="ghost-button danger" id="leaveButton" type="button">Rời phòng</button></div></div>
           <div class="table-scene">
-            <div class="table-ambient"></div><div class="table-surface"><div class="table-inlay"></div><div class="table-center" id="tableCenter"><div class="turn-kicker" id="turnKicker">PHÒNG CHỜ</div><div class="last-play" id="lastPlay">Mời thêm người chơi để bắt đầu</div><div class="pile" id="pile"><img src="/assets/cards/card-back.png" alt="Bộ bài úp" /></div><div class="table-status" id="tableStatus">Chủ phòng có thể bắt đầu khi đủ người.</div></div></div>
+          <div class="table-ambient"></div><div class="table-surface"><div class="table-inlay"></div><div class="table-center" id="tableCenter"><div class="turn-kicker" id="turnKicker">PHÒNG CHỜ</div><div class="last-play" id="lastPlay">Mời thêm người chơi để bắt đầu</div><div class="pile" id="pile"><img src="/assets/cards/card-back.webp" alt="Bộ bài úp" /></div><div class="table-status" id="tableStatus">Chủ phòng có thể bắt đầu khi đủ người.</div></div></div>
             <div class="seat seat-top" id="seatTop"></div><div class="seat seat-left" id="seatLeft"></div><div class="seat seat-right" id="seatRight"></div><div class="seat seat-bottom" id="seatBottom"></div>
           </div>
           <div class="room-toolbar"><div class="lobby-players" id="lobbyPlayers"></div><button class="primary-button compact hidden" id="startButton" type="button">Chia bài & bắt đầu <b>→</b></button><button class="primary-button compact hidden" id="rematchButton" type="button">Ván mới <b>↻</b></button></div>
@@ -61,6 +61,6 @@
       </section>
       <div class="toast" id="toast" role="status"></div>
     </div>
-    <script type="module" src="/app.js"></script>
+    <script type="module" src="/app.js?v=opt-1"></script>
   </body>
 </html>

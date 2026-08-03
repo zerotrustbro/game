@@ -1,7 +1,7 @@
 import { cardRank, cardSort, cardSuit } from './engine.js';
 import { gamePath, parseRoute, roomPath } from './routes.js';
 
-const AVATARS = Array.from({ length: 8 }, (_, index) => `/assets/avatars/avatar-${String(index + 1).padStart(2, '0')}.png`);
+const AVATARS = Array.from({ length: 8 }, (_, index) => `/assets/avatars/avatar-${String(index + 1).padStart(2, '0')}.webp`);
 const SUIT_NAMES = { s: 'bích', c: 'chuồn', d: 'rô', h: 'cơ' };
 const SUIT_MARKS = { s: '♠', c: '♣', d: '♦', h: '♥' };
 const SUIT_CLASS = { s: 'black', c: 'black', d: 'red', h: 'red' };
@@ -85,8 +85,12 @@ async function authRequest(path, body) {
 }
 
 async function loadAccount() {
-  const response = await fetch('/api/auth/me');
-  if (response.ok) state.user = (await response.json()).user;
+  try {
+    const response = await fetch('/api/auth/me');
+    if (response.ok) state.user = (await response.json()).user;
+  } catch {
+    // An unavailable auth endpoint should leave the visitor in guest mode.
+  }
   updateAccountUi();
   if (state.user && pendingRoomCode) {
     const code = pendingRoomCode;
@@ -98,7 +102,9 @@ async function loadAccount() {
 
 function makeRoomCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+  const randomBytes = new Uint8Array(6);
+  crypto.getRandomValues(randomBytes);
+  return Array.from(randomBytes, (value) => chars[value % chars.length]).join('');
 }
 
 function connect(code, { push = false } = {}) {
@@ -120,7 +126,13 @@ function connect(code, { push = false } = {}) {
     setConnection('Đã kết nối', true);
     socket.send(JSON.stringify({ type: 'join', playerId: state.playerId, name: state.name, avatar: state.avatar }));
   });
-  socket.addEventListener('message', (event) => handleMessage(JSON.parse(event.data)));
+  socket.addEventListener('message', (event) => {
+    try {
+      handleMessage(JSON.parse(event.data));
+    } catch {
+      showToast('Phản hồi từ phòng không hợp lệ.', 'error');
+    }
+  });
   socket.addEventListener('close', () => {
     if (state.socket === socket) setConnection('Mất kết nối');
   });
@@ -184,14 +196,9 @@ function applyRoute(route = parseRoute(location.pathname)) {
 
 function renderAvatarPicker() {
   avatarPicker.innerHTML = AVATARS.map((src, index) => `<button class="avatar-choice ${state.avatar === index + 1 ? 'selected' : ''}" type="button" data-avatar="${index + 1}" aria-label="Chân dung ${index + 1}" aria-checked="${state.avatar === index + 1}"><img src="${src}" alt="" /></button>`).join('');
-  avatarPicker.querySelectorAll('[data-avatar]').forEach((button) => button.addEventListener('click', () => {
-    state.avatar = Number(button.dataset.avatar);
-    localStorage.setItem('tienlen-avatar', String(state.avatar));
-    renderAvatarPicker();
-  }));
 }
 
-function seatMarkup(player, position, isLocal, isTurn) {
+function seatMarkup(player, isLocal, isTurn) {
   if (!player) return `<div class="empty-seat"><span>+</span><small>Chờ người</small></div>`;
   const avatar = AVATARS[(player.avatar || 1) - 1] || AVATARS[0];
   return `<div class="player-seat ${isLocal ? 'local' : ''} ${isTurn ? 'turn' : ''} ${player.connected ? '' : 'offline'}"><div class="seat-avatar"><img src="${avatar}" alt="" />${isTurn ? '<i class="turn-ring"></i>' : ''}</div><div class="seat-meta"><b>${esc(player.name)}${isLocal ? ' <small>(bạn)</small>' : ''}</b><span>${player.handCount ? `${player.handCount} lá` : 'Chưa vào ván'}${player.connected ? '' : ' · mất kết nối'}</span></div></div>`;
@@ -209,10 +216,10 @@ function renderRoom() {
   const [top, left, right, bottom] = arrangeSeats(players);
   const isHost = room.hostId === state.playerId;
   const isTurn = room.turnPlayerId === state.playerId;
-  $('seatTop').innerHTML = seatMarkup(top, 'top', false, top?.id === room.turnPlayerId);
-  $('seatLeft').innerHTML = seatMarkup(left, 'left', false, left?.id === room.turnPlayerId);
-  $('seatRight').innerHTML = seatMarkup(right, 'right', false, right?.id === room.turnPlayerId);
-  $('seatBottom').innerHTML = seatMarkup(bottom, 'bottom', true, bottom?.id === room.turnPlayerId);
+  $('seatTop').innerHTML = seatMarkup(top, false, top?.id === room.turnPlayerId);
+  $('seatLeft').innerHTML = seatMarkup(left, false, left?.id === room.turnPlayerId);
+  $('seatRight').innerHTML = seatMarkup(right, false, right?.id === room.turnPlayerId);
+  $('seatBottom').innerHTML = seatMarkup(bottom, true, bottom?.id === room.turnPlayerId);
   $('lobbyPlayers').innerHTML = players.map((player) => `<span class="lobby-player ${player.connected ? '' : 'offline'}"><img src="${AVATARS[(player.avatar || 1) - 1]}" alt="" />${esc(player.name)}</span>`).join('');
   $('startButton').classList.toggle('hidden', room.phase !== 'lobby' || !isHost);
   $('rematchButton').classList.toggle('hidden', !room.gameOver || !isHost);
@@ -258,14 +265,8 @@ function cardMarkup(card, index) {
 function renderHand(room, isTurn) {
   const me = room.players.find((player) => player.id === state.playerId);
   const hand = [...(me?.hand || [])].sort(cardSort);
-  $('handTitle').textContent = me ? `${hand.length} lá · ${esc(me.name)}` : 'Bạn chưa vào bàn';
+  $('handTitle').textContent = me ? `${hand.length} lá · ${me.name}` : 'Bạn chưa vào bàn';
   $('hand').innerHTML = hand.length ? hand.map(cardMarkup).join('') : '<div class="hand-empty">Bài của bạn sẽ xuất hiện sau khi chủ phòng chia bài.</div>';
-  $('hand').querySelectorAll('[data-card]').forEach((button) => button.addEventListener('click', () => {
-    if (!isTurn || room.gameOver) return;
-    const card = button.dataset.card;
-    state.selected.has(card) ? state.selected.delete(card) : state.selected.add(card);
-    renderHand(room, isTurn);
-  }));
   $('playButton').disabled = !isTurn || state.selected.size === 0 || room.gameOver;
   $('passButton').disabled = !isTurn || !room.currentPlay || room.gameOver;
   $('selectionHint').textContent = room.gameOver ? 'Ván đã kết thúc.' : isTurn ? (state.selected.size ? `${state.selected.size} lá đã chọn · sắp xếp theo luật miền Nam` : 'Chọn một hoặc nhiều lá để đánh.') : 'Đợi đến lượt bạn.';
@@ -275,6 +276,21 @@ $('createButton').addEventListener('click', () => {
   state.name = playerName.value.trim().slice(0, 18) || 'Người chơi';
   localStorage.setItem('tienlen-name', state.name);
   connect(makeRoomCode(), { push: true });
+});
+avatarPicker.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-avatar]');
+  if (!button) return;
+  state.avatar = Number(button.dataset.avatar);
+  localStorage.setItem('tienlen-avatar', String(state.avatar));
+  renderAvatarPicker();
+});
+$('hand').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-card]');
+  const room = state.room;
+  if (!button || !room || room.turnPlayerId !== state.playerId || room.gameOver) return;
+  const card = button.dataset.card;
+  state.selected.has(card) ? state.selected.delete(card) : state.selected.add(card);
+  renderHand(room, true);
 });
 $('joinButton').addEventListener('click', () => {
   state.name = playerName.value.trim().slice(0, 18) || 'Người chơi';
@@ -292,8 +308,13 @@ $('playButton').addEventListener('click', () => {
 $('passButton').addEventListener('click', () => send({ type: 'pass' }));
 $('copyRoomButton').addEventListener('click', async () => {
   const link = `${location.origin}${roomPath(state.roomCode)}`;
-  await navigator.clipboard?.writeText(link);
-  showToast('Đã sao chép link mời bạn vào phòng.');
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
+    await navigator.clipboard.writeText(link);
+    showToast('Đã sao chép link mời bạn vào phòng.');
+  } catch {
+    showToast('Không thể sao chép link trên thiết bị này.', 'error');
+  }
 });
 $('leaveButton').addEventListener('click', () => {
   history.pushState({}, '', gamePath());

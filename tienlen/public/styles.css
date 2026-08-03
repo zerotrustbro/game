@@ -112,7 +112,7 @@ main { width: min(1240px, calc(100% - 48px)); margin: 0 auto; }
 .room-head-actions, .hand-actions { display: flex; gap: 8px; }
 .ghost-button { width: auto; height: 37px; padding: 0 13px; border-color: rgba(198,219,197,.2); background: transparent; color: var(--muted); font-size: 9px; }
 .ghost-button.danger:hover:not(:disabled) { border-color: rgba(207,92,87,.6); color: #f29b8f; }
-.table-scene { position: relative; min-height: 0; height: 100%; overflow: hidden; border: 1px solid rgba(210,173,100,.25); border-radius: 6px; background: #111b1c url('/assets/background/game-room-background.png') center / cover; box-shadow: var(--shadow); }
+.table-scene { position: relative; min-height: 0; height: 100%; overflow: hidden; border: 1px solid rgba(210,173,100,.25); border-radius: 6px; background: #111b1c url('/assets/background/game-room-background.webp') center / cover; box-shadow: var(--shadow); }
 .table-scene::after { position: absolute; z-index: 1; inset: 0; content: ""; background: linear-gradient(180deg, rgba(3,12,13,.4), rgba(3,12,13,.12) 42%, rgba(3,12,13,.7)); pointer-events: none; }
 .table-ambient { position: absolute; z-index: 2; inset: 0; background: radial-gradient(ellipse at 50% 52%, rgba(55,154,144,.18), transparent 45%); pointer-events: none; }
 .table-surface { position: absolute; z-index: 3; top: 19%; left: 13%; width: 74%; height: 67%; border: 14px solid rgba(12,24,23,.9); border-radius: 50%; background: radial-gradient(ellipse at 50% 40%, #175b59, #0e4146 68%, #0c3439); box-shadow: 0 12px 0 rgba(2,12,12,.65), inset 0 0 0 2px rgba(212,180,104,.45), inset 0 0 70px rgba(0,0,0,.4), 0 18px 50px rgba(0,0,0,.5); transform: perspective(800px) rotateX(8deg); }
