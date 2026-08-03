@@ -6,6 +6,7 @@ const SESSION_DAYS = 30;
 const SECONDS_PER_DAY = 86400;
 const SESSION_MAX_AGE = SESSION_DAYS * SECONDS_PER_DAY;
 const SESSION_TTL = SESSION_MAX_AGE * 1000;
+const PUBLIC_AUTH_PATHS = new Set(['/register', '/login', '/me', '/logout']);
 
 function json(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), {
@@ -263,7 +264,7 @@ export class Room {
     const existing = this.room.players.find((player) => player.accountId === session.account.id);
     if (!existing && this.room.players.length >= MAX_PLAYERS) return this.send(session.socket, { type: 'error', message: 'Phòng đã đủ 4 người.' });
     if (this.room.phase === 'game' && !existing) return this.send(session.socket, { type: 'error', message: 'Ván đã bắt đầu, hãy vào ván kế tiếp.' });
-    const playerId = existing?.id || String(message.playerId || crypto.randomUUID()).slice(0, 64);
+    const playerId = existing?.id || crypto.randomUUID();
     if (existing) {
       existing.name = cleanName(session.account.displayName || message.name);
       existing.username = session.account.username;
@@ -293,7 +294,7 @@ export class Room {
     const result = playMove(this.room.game, session.playerId, cards);
     if (!result.ok) return this.error(session, result.error);
     this.room.game = result.game;
-    if (result.game.gameOver && !this.room.settlement) await this.settleGame(result.game);
+    if (result.game.gameOver && this.room.settlement?.status !== 'complete') await this.settleGame(result.game);
     await this.save();
     this.broadcastState(result.action);
   }
@@ -310,6 +311,10 @@ export class Room {
   async restart(session) {
     if (!this.isKnown(session) || this.room.hostId !== session.playerId) return this.error(session, 'Chỉ chủ phòng mới có thể chơi ván mới.');
     if (!this.room.game?.gameOver) return this.error(session, 'Ván hiện tại chưa kết thúc.');
+    if (this.room.settlement?.status !== 'complete') {
+      const settled = await this.settleGame(this.room.game);
+      if (!settled) return this.error(session, 'Chưa thể hoàn tất thanh toán, hãy thử lại sau.');
+    }
     if (!this.canAffordRound()) return this.error(session, `Mỗi người cần ít nhất ${LOSS_PENALTY} xu để chơi tiếp.`);
     await this.beginRound();
   }
@@ -332,17 +337,32 @@ export class Room {
   }
 
   async settleGame(game) {
-    const winner = game.players.find((player) => player.id === game.winner);
-    const loserIds = game.players.filter((player) => player.id !== game.winner).map((player) => player.accountId).filter(Boolean);
-    if (!winner?.accountId || !loserIds.length) return;
-    const id = this.env.ACCOUNTS.idFromName('global');
-    const response = await this.env.ACCOUNTS.get(id).fetch(new Request('https://accounts/settle', { method: 'POST', headers: { 'content-type': 'application/json', 'x-internal-account': '1' }, body: JSON.stringify({ reference: `${this.room.roomCode}:${this.room.roundId}`, winnerId: winner.accountId, loserIds }) }));
-    if (!response.ok) return;
-    const result = await response.json();
-    const accountToPlayer = new Map(game.players.map((player) => [player.accountId, player.id]));
-    this.room.settlement = { penalty: result.penalty, changes: result.changes.map((change) => ({ playerId: accountToPlayer.get(change.userId), amount: change.amount })) };
-    for (const player of this.room.players) if (result.balances[player.accountId] !== undefined) player.coins = result.balances[player.accountId];
-    for (const socket of this.sockets.values()) if (result.balances[socket.account.id] !== undefined) socket.account.coins = result.balances[socket.account.id];
+    const reference = `${this.room.roomCode}:${this.room.roundId}`;
+    this.room.settlement = { status: 'pending', reference, penalty: LOSS_PENALTY, changes: [] };
+    try {
+      await this.save();
+      const winner = game.players.find((player) => player.id === game.winner);
+      const loserIds = game.players.filter((player) => player.id !== game.winner).map((player) => player.accountId).filter(Boolean);
+      if (!winner?.accountId || !loserIds.length) throw new Error('Missing settlement account.');
+      const id = this.env.ACCOUNTS.idFromName('global');
+      const response = await this.env.ACCOUNTS.get(id).fetch(new Request('https://accounts/settle', { method: 'POST', headers: { 'content-type': 'application/json', 'x-internal-account': '1' }, body: JSON.stringify({ reference, winnerId: winner.accountId, loserIds }) }));
+      if (!response.ok) throw new Error(`Account settlement returned ${response.status}.`);
+      const result = await response.json();
+      const accountToPlayer = new Map(game.players.map((player) => [player.accountId, player.id]));
+      this.room.settlement = { status: 'complete', reference, penalty: result.penalty, changes: result.changes.map((change) => ({ playerId: accountToPlayer.get(change.userId), amount: change.amount })) };
+      for (const player of this.room.players) if (result.balances[player.accountId] !== undefined) player.coins = result.balances[player.accountId];
+      for (const socket of this.sockets.values()) if (result.balances[socket.account.id] !== undefined) socket.account.coins = result.balances[socket.account.id];
+      return true;
+    } catch (error) {
+      this.room.settlement = { status: 'failed', reference, penalty: LOSS_PENALTY, changes: [] };
+      console.error('Room settlement failed:', error);
+      try {
+        await this.save();
+      } catch (saveError) {
+        console.error('Room settlement failure state could not be saved:', saveError);
+      }
+      return false;
+    }
   }
 
   onClose(session) {
@@ -374,7 +394,7 @@ export class Room {
       const gamePlayer = gamePlayers.get(member.id);
       return { id: member.id, username: member.username, name: member.name, avatar: member.avatar, connected: member.connected, handCount: gamePlayer?.hand.length ?? 0, hand: member.id === playerId ? (gamePlayer?.hand || []) : undefined };
     });
-    const settlement = this.room.settlement ? { penalty: this.room.settlement.penalty, changes: this.room.settlement.changes } : null;
+    const settlement = this.room.settlement ? { status: this.room.settlement.status || 'complete', penalty: this.room.settlement.penalty, changes: this.room.settlement.changes } : null;
     const session = [...this.sockets.values()].find((item) => item.playerId === playerId);
     return { type: 'state', you: playerId, phase: this.room.phase, roomCode: this.room.roomCode, hostId: this.room.hostId, players, turnPlayerId: game ? game.players[game.turnIndex]?.id : null, currentPlay: game?.currentPlay || null, gameOver: game?.gameOver || false, winner: game?.winner || null, wallet: session?.account.coins ?? null, settlement, action: action || null };
   }
@@ -396,9 +416,11 @@ export default {
     const url = new URL(request.url);
     if (url.pathname.startsWith('/api/auth/')) {
       const path = url.pathname.replace('/api/auth', '') || '/me';
+      if (!PUBLIC_AUTH_PATHS.has(path)) return json({ error: 'Account route not found.' }, 404);
       const target = new URL(`https://accounts${path}`);
       target.searchParams.set('client_proto', url.protocol);
       const headers = new Headers(request.headers);
+      headers.delete('x-internal-account');
       return env.ACCOUNTS.get(env.ACCOUNTS.idFromName('global')).fetch(new Request(target, { method: request.method, headers, body: request.method === 'GET' || request.method === 'HEAD' ? undefined : request.body }));
     }
     if (url.pathname === '/api/health') return json({ ok: true, service: 'game', game: 'tienlen' });

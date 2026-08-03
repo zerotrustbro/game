@@ -8,7 +8,7 @@ const SUIT_CLASS = { s: 'black', c: 'black', d: 'red', h: 'red' };
 const state = {
   socket: null,
   roomCode: '',
-  playerId: localStorage.getItem('tienlen-player-id') || crypto.randomUUID(),
+  playerId: null,
   name: localStorage.getItem('tienlen-name') || '',
   avatar: Number(localStorage.getItem('tienlen-avatar') || 1),
   room: null,
@@ -16,7 +16,6 @@ const state = {
   selected: new Set(),
   sound: localStorage.getItem('tienlen-sound') !== 'off',
 };
-localStorage.setItem('tienlen-player-id', state.playerId);
 
 const $ = (id) => document.getElementById(id);
 const hubView = $('hubView');
@@ -124,7 +123,7 @@ function connect(code, { push = false } = {}) {
   setConnection('Đang kết nối…');
   socket.addEventListener('open', () => {
     setConnection('Đã kết nối', true);
-    socket.send(JSON.stringify({ type: 'join', playerId: state.playerId, name: state.name, avatar: state.avatar }));
+    socket.send(JSON.stringify({ type: 'join', name: state.name, avatar: state.avatar }));
   });
   socket.addEventListener('message', (event) => {
     try {
@@ -148,6 +147,10 @@ function handleMessage(message) {
   if (message.type === 'connected') return;
   if (message.type === 'error') return showToast(message.message, 'error');
   if (message.type !== 'state') return;
+  if (message.you) {
+    state.playerId = message.you;
+    localStorage.setItem('tienlen-player-id', state.playerId);
+  }
   state.room = message;
   state.selected.clear();
   hubView.classList.add('hidden');
