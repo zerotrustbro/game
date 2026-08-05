@@ -29,10 +29,10 @@
           <div class="lobby-card">
             <div class="lobby-card-header"><span class="mini-label">CHỌN BÀN</span><span class="players-badge">5 BÀN · 2—4 NGƯỜI</span></div>
             <div id="inviteNote" class="invite-note hidden"></div>
-            <label class="field-label" for="playerName">Tên của bạn</label><input id="playerName" class="text-input" maxlength="18" placeholder="Nhập tên hiển thị" autocomplete="nickname" />
-            <label class="field-label">Chọn chân dung</label><div class="avatar-picker" id="avatarPicker" role="radiogroup" aria-label="Chọn chân dung"></div>
+            <div id="guestGate" class="auth-gate hidden"><p>Mọi trò chơi dùng chung một tài khoản Game Room. Đăng nhập (hoặc tạo tài khoản) để vào bàn.</p><button class="primary-button compact" id="gateLogin" type="button">Đăng nhập / Tạo tài khoản <b>→</b></button></div>
+            <div id="playerFields" class="hidden"><label class="field-label">Chọn chân dung</label><div class="avatar-picker" id="avatarPicker" role="radiogroup" aria-label="Chọn chân dung"></div></div>
             <div id="roomList" class="room-list" aria-live="polite"><p class="room-list-loading">Đang tải danh sách bàn…</p></div>
-            <p class="form-note" id="homeMessage">Bàn trống nhận người chơi mới. Khi ván bắt đầu, bàn sẽ khóa.</p>
+            <p class="form-note" id="homeMessage">Chọn một bàn để vào. Khi ván bắt đầu, bàn sẽ khóa.</p>
           </div>
         </section>
 

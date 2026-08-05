@@ -70,6 +70,8 @@ main { width: min(1240px, calc(100% - 48px)); margin: 0 auto; }
 .game-tile.upcoming .tile-copy { padding: 22px 25px; }
 .game-tile.upcoming .tile-copy h2 { margin: 8px 0 5px; font-size: 23px; }
 .invite-note { margin: -8px 0 13px; padding: 9px 11px; border-left: 2px solid var(--gold); background: rgba(210,173,100,.08); color: #d8c999; font-size: 10px; line-height: 1.45; }
+.auth-gate { margin: 0 0 14px; padding: 15px 14px; border: 1px dashed rgba(210,173,100,.45); background: rgba(210,173,100,.06); text-align: center; }
+.auth-gate p { margin: 0 0 13px; color: #d8c999; font-size: 11px; line-height: 1.55; }
 .eyebrow { margin: 0 0 15px; color: var(--gold); font-size: 10px; font-weight: 700; letter-spacing: .28em; }
 .hero-copy h1 { margin: 0; color: #fff4df; font-family: "Playfair Display", Georgia, serif; font-size: clamp(52px, 7vw, 96px); font-weight: 600; line-height: .92; letter-spacing: -.055em; }
 .hero-copy h1 em { color: var(--gold-soft); font-style: normal; }

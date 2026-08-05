@@ -87,6 +87,20 @@ test('account sessions honor the original protocol and settlement is idempotent'
   ]);
 });
 
+test('room websocket is rejected without an account session', async () => {
+  const env = {
+    ACCOUNTS: {
+      idFromName: () => 'global',
+      get: () => ({
+        fetch: async () => new Response(JSON.stringify({ user: null }), { status: 401 }),
+      }),
+    },
+  };
+  const response = await worker.fetch(new Request('https://game.test/api/room/BAN01', { headers: { Upgrade: 'websocket' } }), env);
+  assert.equal(response.status, 401);
+  assert.match((await response.json()).error, /đăng nhập/);
+});
+
 test('public worker lists five room summaries', async () => {
   const seen = [];
   const env = {

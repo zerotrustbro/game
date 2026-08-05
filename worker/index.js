@@ -343,14 +343,14 @@ export class Room {
     if (this.room.phase === 'game' && !existing) return this.send(session.socket, { type: 'error', message: 'Ván đã bắt đầu, hãy vào ván kế tiếp.' });
     const playerId = existing?.id || crypto.randomUUID();
     if (existing) {
-      existing.name = cleanName(session.account.displayName || message.name);
+      existing.name = cleanName(session.account.displayName);
       existing.username = session.account.username;
       existing.accountId = session.account.id;
       existing.avatar = cleanAvatar(message.avatar || existing.avatar);
       existing.coins = session.account.coins;
       existing.connected = true;
     } else {
-      this.room.players.push({ id: playerId, accountId: session.account.id, username: session.account.username, name: cleanName(session.account.displayName || message.name), avatar: cleanAvatar(message.avatar), coins: session.account.coins, connected: true });
+      this.room.players.push({ id: playerId, accountId: session.account.id, username: session.account.username, name: cleanName(session.account.displayName), avatar: cleanAvatar(message.avatar), coins: session.account.coins, connected: true });
       if (!this.room.hostId) this.room.hostId = playerId;
     }
     session.playerId = playerId;

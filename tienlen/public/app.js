@@ -9,7 +9,6 @@ const state = {
   socket: null,
   roomCode: '',
   playerId: null,
-  name: localStorage.getItem('tienlen-name') || '',
   avatar: Number(localStorage.getItem('tienlen-avatar') || 1),
   room: null,
   rooms: [],
@@ -22,7 +21,6 @@ const $ = (id) => document.getElementById(id);
 const hubView = $('hubView');
 const gameLobbyView = $('gameLobbyView');
 const roomView = $('roomView');
-const playerName = $('playerName');
 const avatarPicker = $('avatarPicker');
 const roomList = $('roomList');
 const toast = $('toast');
@@ -33,7 +31,6 @@ const authPanel = $('authPanel');
 const authBackdrop = $('authBackdrop');
 let pendingRoomCode = null;
 
-playerName.value = state.name;
 $('soundButton').textContent = state.sound ? '◖' : '◌';
 
 function esc(value) {
@@ -62,6 +59,9 @@ function updateAccountUi() {
   $('authTitle').textContent = state.user ? 'Tài khoản của bạn' : 'Đăng nhập để chơi';
   $('accountName').textContent = state.user?.displayName || '—';
   $('accountCoins').textContent = state.user?.coins ?? 0;
+  $('guestGate').classList.toggle('hidden', Boolean(state.user));
+  $('playerFields').classList.toggle('hidden', !state.user);
+  $('homeMessage').textContent = state.user ? 'Chọn một bàn để vào. Khi ván bắt đầu, bàn sẽ khóa.' : 'Đăng nhập để chọn bàn và vào chơi.';
 }
 
 function openAuth() {
@@ -148,7 +148,7 @@ function connect(code, { push = false } = {}) {
   setConnection('Đang kết nối…');
   socket.addEventListener('open', () => {
     setConnection('Đã kết nối', true);
-    socket.send(JSON.stringify({ type: 'join', name: state.name, avatar: state.avatar }));
+    socket.send(JSON.stringify({ type: 'join', avatar: state.avatar }));
   });
   socket.addEventListener('message', (event) => {
     try {
@@ -206,7 +206,7 @@ function showGameLobby(roomCode = null) {
   setConnection('Chưa kết nối');
   const inviteNote = $('inviteNote');
   inviteNote.classList.toggle('hidden', !roomCode);
-  inviteNote.textContent = roomCode ? `Bạn được mời vào phòng ${roomCode}. Nhập tên rồi chọn bàn ${roomCode}.` : '';
+  inviteNote.textContent = roomCode ? `Bạn được mời vào phòng ${roomCode}. Đăng nhập rồi chọn bàn ${roomCode} để vào.` : '';
   renderRoomList();
 }
 
@@ -317,11 +317,9 @@ $('hand').addEventListener('click', (event) => {
 roomList.addEventListener('click', (event) => {
   const button = event.target.closest('[data-room-code]');
   if (!button || button.disabled) return;
-  state.name = playerName.value.trim().slice(0, 18) || 'Người chơi';
-  localStorage.setItem('tienlen-name', state.name);
   connect(button.dataset.roomCode, { push: true });
 });
-playerName.addEventListener('keydown', (event) => { if (event.key === 'Enter') roomList.querySelector('.room-choice:not(:disabled)')?.click(); });
+$('gateLogin').addEventListener('click', openAuth);
 $('startButton').addEventListener('click', () => send({ type: 'start' }));
 $('rematchButton').addEventListener('click', () => send({ type: 'restart' }));
 $('playButton').addEventListener('click', () => {
@@ -353,8 +351,6 @@ $('registerTab').addEventListener('click', () => {
 });
 async function finishAuth(user) {
   state.user = user;
-  state.name = user.displayName;
-  localStorage.setItem('tienlen-name', state.name);
   updateAccountUi();
   await loadRooms();
   closeAuth();
