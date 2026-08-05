@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#081626" />
+    <meta name="description" content="Poki Duel — game đấu thú xếp ngọc realtime 1vs1 trong hệ sinh thái Game Room." />
+    <title>Poki Duel — Gem Battle</title>
+    <link rel="stylesheet" href="/poki/poki.css?v=poki-1" />
+    <link rel="stylesheet" href="/poki/poki-ui.css?v=poki-1" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <div class="auth-backdrop hidden" id="authBackdrop"></div>
+    <section class="auth-panel hidden" id="authPanel" aria-labelledby="authTitle">
+      <button class="auth-close" id="authClose" type="button" aria-label="Đóng">×</button>
+      <p class="eyebrow">GAME ROOM ACCOUNT</p>
+      <h2 id="authTitle">Đăng nhập để chơi</h2>
+      <p class="auth-lead">Dùng chung tài khoản của Game Room — cùng hệ thống với Tiến Lên Miền Nam.</p>
+      <div class="auth-tabs"><button class="auth-tab active" id="loginTab" type="button">Đăng nhập</button><button class="auth-tab" id="registerTab" type="button">Tạo tài khoản</button></div>
+      <form id="loginForm" class="auth-form">
+        <label class="field-label" for="loginUsername">Tên tài khoản</label>
+        <input id="loginUsername" class="text-input" maxlength="18" autocomplete="username" required placeholder="vd: chungbuild" />
+        <label class="field-label" for="loginPassword">Mật khẩu</label>
+        <input id="loginPassword" class="text-input" type="password" maxlength="72" autocomplete="current-password" required placeholder="Ít nhất 6 ký tự" />
+        <button class="auth-submit" type="submit">Đăng nhập <b>→</b></button>
+      </form>
+      <form id="registerForm" class="auth-form hidden">
+        <label class="field-label" for="registerUsername">Tên tài khoản</label>
+        <input id="registerUsername" class="text-input" maxlength="18" autocomplete="username" required placeholder="a-z, 0-9 hoặc _" />
+        <label class="field-label" for="registerDisplayName">Tên hiển thị</label>
+        <input id="registerDisplayName" class="text-input" maxlength="18" autocomplete="nickname" required placeholder="Tên mọi người sẽ thấy" />
+        <label class="field-label" for="registerPassword">Mật khẩu</label>
+        <input id="registerPassword" class="text-input" type="password" maxlength="72" autocomplete="new-password" required placeholder="Ít nhất 6 ký tự" />
+        <button class="auth-submit" type="submit">Tạo tài khoản <b>→</b></button>
+      </form>
+      <div class="auth-error" id="authError" role="alert"></div>
+    </section>
+    <div class="toast" id="toast" role="status"></div>
+    <script type="module" src="/poki/app.js?v=poki-1"></script>
+  </body>
+</html>

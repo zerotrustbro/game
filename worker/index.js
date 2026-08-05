@@ -1,8 +1,13 @@
 import { dealGame, passMove, playMove } from '../tienlen/public/engine.js';
 import { settleCoins, STARTING_COINS, LOSS_PENALTY } from '../tienlen/public/economy.js';
 import { ROOM_CODES } from '../tienlen/public/routes.js';
+import { applyBattleDamage, applySpecial, applySpecialTurn, createBoard, initialRoom, MONSTERS, resolveSwap, SIZE } from '../poki/public/game.js';
+import { POKI_ROOM_CODES } from '../poki/public/routes.js';
 
 const MAX_PLAYERS = 4;
+const POKI_MAX_PLAYERS = 2;
+const POKI_MONSTER_IDS = Object.freeze(Object.keys(MONSTERS));
+const POKI_GEMS = new Set(['sword', 'heart', 'mana']);
 const SESSION_DAYS = 30;
 const SECONDS_PER_DAY = 86400;
 const SESSION_MAX_AGE = SESSION_DAYS * SECONDS_PER_DAY;
@@ -31,6 +36,11 @@ function cleanAvatar(value) {
 
 function roomCode(pathname) {
   const match = pathname.match(/^\/api\/room\/([A-Z0-9]{4,8})$/);
+  return match?.[1] || null;
+}
+
+function pokiRoomCode(pathname) {
+  const match = pathname.match(/^\/api\/poki\/room\/([A-Z0-9-]{1,12})$/);
   return match?.[1] || null;
 }
 
@@ -473,6 +483,272 @@ export class Room {
   async save() { await this.state.storage.put('room', this.room); }
 }
 
+function freshPokiBattle(players) {
+  const battle = initialRoom();
+  for (const player of players) battle.players.push({ id: player.id, monster: player.monster, name: player.name, connected: player.connected });
+  for (const player of battle.players) {
+    battle.hp[player.id] = MONSTERS[player.monster].maxHp;
+    battle.mana[player.id] = 0;
+    battle.shield[player.id] = 0;
+  }
+  return battle;
+}
+
+function normalizePokiRoom(saved) {
+  if (!saved || typeof saved !== 'object') return { room: initialRoom(), changed: false };
+  const players = Array.isArray(saved.players)
+    ? saved.players.slice(0, POKI_MAX_PLAYERS).map((player = {}) => ({
+        id: String(player.id || crypto.randomUUID()).slice(0, 64),
+        monster: POKI_MONSTER_IDS.includes(player.monster) ? player.monster : 'emberfox',
+        name: cleanName(player.name),
+        connected: player.connected !== false,
+      }))
+    : [];
+  const boardOk = Array.isArray(saved.board) && saved.board.length === SIZE
+    && saved.board.every((row) => Array.isArray(row) && row.length === SIZE && row.every((gem) => POKI_GEMS.has(gem)));
+  const battle = { players, board: boardOk ? saved.board : createBoard(), hp: {}, mana: {}, shield: {}, turn: 0, gameOver: false, winner: undefined, loser: undefined, lastAction: undefined };
+  for (const player of players) {
+    const read = (record, fallback) => Number.isFinite(Number(saved[record]?.[player.id])) ? Number(saved[record][player.id]) : fallback;
+    battle.hp[player.id] = Math.max(0, read('hp', MONSTERS[player.monster].maxHp));
+    battle.mana[player.id] = Math.min(100, Math.max(0, read('mana', 0)));
+    battle.shield[player.id] = Math.max(0, read('shield', 0));
+  }
+  battle.turn = Number.isInteger(saved.turn) && saved.turn >= 0 ? saved.turn : 0;
+  battle.gameOver = Boolean(saved.gameOver) && players.length > 0;
+  if (battle.gameOver && players.some((player) => player.id === saved.winner)) battle.winner = saved.winner;
+  if (battle.gameOver && players.some((player) => player.id === saved.loser)) battle.loser = saved.loser;
+  return { room: battle, changed: false };
+}
+
+export class PokiRoom {
+  constructor(state, env) {
+    this.state = state;
+    this.env = env;
+    this.sockets = new Map();
+    this.code = null;
+    this.battle = null;
+    this.queue = Promise.resolve();
+    this.ready = state.storage.get('poki').then((saved) => {
+      this.battle = normalizePokiRoom(saved).room;
+    });
+  }
+
+  async fetch(request) {
+    await this.ready;
+    const url = new URL(request.url);
+    const code = pokiRoomCode(url.pathname) || url.searchParams.get('code');
+    if (code) this.code = code;
+    if (url.pathname === '/summary' && request.method === 'GET' && request.headers.get('x-internal-room') === '1') {
+      return json(this.summary(request.headers.get('x-account-id')));
+    }
+    if (request.headers.get('Upgrade') !== 'websocket') return json({ error: 'WebSocket required' }, 426);
+    const accountId = request.headers.get('x-account-id');
+    if (!accountId) return json({ error: 'Bạn cần đăng nhập để chơi.' }, 401);
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair);
+    server.accept();
+    const session = {
+      socket: server,
+      account: {
+        id: accountId,
+        username: request.headers.get('x-account-username') || '',
+        displayName: request.headers.get('x-account-display-name') || '',
+      },
+    };
+    this.sockets.set(server, session);
+    server.addEventListener('message', (event) => {
+      this.queue = this.queue.catch(() => {}).then(() => this.onMessage(session, event.data));
+    });
+    server.addEventListener('close', () => this.onClose(session));
+    server.addEventListener('error', () => this.onClose(session));
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  summary(accountId) {
+    const players = this.battle.players.length;
+    const existing = accountId ? this.battle.players.some((player) => player.id === accountId) : false;
+    return {
+      code: this.code || 'POKI??',
+      players,
+      maxPlayers: POKI_MAX_PLAYERS,
+      phase: players >= POKI_MAX_PLAYERS ? 'game' : 'waiting',
+      canJoin: existing || players < POKI_MAX_PLAYERS,
+      gameOver: Boolean(this.battle.gameOver),
+    };
+  }
+
+  async onMessage(session, raw) {
+    try {
+      const message = JSON.parse(raw);
+      switch (message.type) {
+        case 'join': await this.join(session, message); break;
+        case 'move': await this.move(session, message); break;
+        case 'special': await this.special(session); break;
+        case 'restart': await this.restart(session); break;
+        case 'leave': await this.leave(session); break;
+        default: this.send(session.socket, { type: 'error', message: 'Yêu cầu không hợp lệ.' });
+      }
+    } catch {
+      this.send(session.socket, { type: 'error', message: 'Không thể xử lý yêu cầu.' });
+    }
+  }
+
+  socketFor(accountId) {
+    return [...this.sockets.values()].find((session) => session.account.id === accountId) || null;
+  }
+
+  async join(session, message) {
+    const monster = String(message.monster || '');
+    if (!POKI_MONSTER_IDS.includes(monster)) return this.error(session, 'Hãy chọn một Poki thú.', true);
+    const accountId = session.account.id;
+    const existing = this.battle.players.find((player) => player.id === accountId);
+    if (existing) {
+      // Reconnect of an existing player: keep the battle in progress.
+      existing.monster = monster;
+      existing.name = cleanName(session.account.displayName || existing.name);
+      existing.connected = true;
+      await this.save();
+      this.broadcastState();
+      return;
+    }
+    if (this.battle.players.length >= POKI_MAX_PLAYERS) {
+      const offline = this.battle.players.find((player) => player.connected === false);
+      if (!offline) return this.error(session, 'Bàn đã đủ 2 người. Hãy chọn bàn khác.', true);
+      this.battle.players.splice(this.battle.players.indexOf(offline), 1);
+    }
+    this.battle = addPokiPlayer(this.battle, accountId, monster, cleanName(session.account.displayName || 'Người chơi'));
+    if (this.battle.players.length === POKI_MAX_PLAYERS) this.battle = freshPokiBattle(this.battle.players);
+    await this.save();
+    this.broadcastState();
+  }
+
+  async move(session, message) {
+    if (this.battle.players.length !== POKI_MAX_PLAYERS) return this.error(session, 'Bàn chưa đủ hai người chơi.');
+    const active = this.battle.players[this.battle.turn % POKI_MAX_PLAYERS];
+    if (active?.id !== session.account.id) return this.error(session, 'Chưa đến lượt bạn.');
+    if (this.battle.gameOver) return this.error(session, 'Trận đấu đã kết thúc. Hãy đấu lại hoặc rời bàn.');
+    const { from, to } = message;
+    if (!from || !to || !Number.isInteger(from.x) || !Number.isInteger(from.y) || !Number.isInteger(to.x) || !Number.isInteger(to.y)) return this.error(session, 'Nước đi không hợp lệ.');
+    const result = resolveSwap(this.battle.board, from, to);
+    if (!result.valid) return this.error(session, 'Đổi hai gem kề nhau để tạo bộ 3.');
+    const self = this.battle.players.find((player) => player.id === session.account.id);
+    const foe = this.battle.players.find((player) => player.id !== session.account.id);
+    const hit = applyBattleDamage(this.battle, foe.id, result.damage);
+    this.battle = {
+      ...hit.state,
+      board: result.board,
+      hp: { ...hit.state.hp, [session.account.id]: Math.min(MONSTERS[self.monster].maxHp, this.battle.hp[session.account.id] + result.healing) },
+      mana: { ...hit.state.mana, [session.account.id]: Math.min(100, this.battle.mana[session.account.id] + result.mana) },
+      turn: this.battle.turn + 1,
+      lastAction: { player: session.account.id, damage: result.damage, healing: result.healing, mana: result.mana, cleared: result.cleared, cascades: result.cascades, primaryKind: result.primaryKind, frames: result.frames },
+    };
+    await this.save();
+    this.broadcastState();
+  }
+
+  async special(session) {
+    if (this.battle.players.length !== POKI_MAX_PLAYERS) return this.error(session, 'Bàn chưa đủ hai người chơi.');
+    const active = this.battle.players[this.battle.turn % POKI_MAX_PLAYERS];
+    if (active?.id !== session.account.id) return this.error(session, 'Chưa đến lượt bạn.');
+    if (this.battle.gameOver) return this.error(session, 'Trận đấu đã kết thúc. Hãy đấu lại hoặc rời bàn.');
+    const player = this.battle.players.find((p) => p.id === session.account.id);
+    const skill = applySpecial(player.monster, this.battle.mana[session.account.id]);
+    if (!skill.valid) return this.error(session, 'Cần đủ 100 Mana để dùng kỹ năng.');
+    const result = applySpecialTurn(this.battle, session.account.id, this.battle.mana[session.account.id], skill);
+    this.battle = {
+      ...result.state,
+      turn: this.battle.turn + 1,
+      lastAction: { player: session.account.id, damage: skill.damage, healing: skill.healing, mana: 0, cleared: 0, cascades: 0, special: true, skillName: skill.name },
+    };
+    await this.save();
+    this.broadcastState();
+  }
+
+  async restart(session) {
+    if (!this.battle.gameOver) return this.error(session, 'Trận hiện tại chưa kết thúc.');
+    this.battle = freshPokiBattle(this.battle.players);
+    await this.save();
+    this.broadcastState();
+  }
+
+  async leave(session) {
+    this.removePlayer(session.account.id);
+    this.sockets.delete(session.socket);
+    await this.save();
+    this.broadcastState();
+    try { session.socket.close(1000, 'bye'); } catch { /* closed */ }
+  }
+
+  removePlayer(accountId) {
+    const index = this.battle.players.findIndex((player) => player.id === accountId);
+    if (index < 0) return;
+    this.battle.players.splice(index, 1);
+    const remaining = this.battle.players.map(({ id, monster, name }) => ({ id, monster, name, connected: this.socketFor(id) != null }));
+    this.battle = remaining.length ? freshPokiBattle(remaining) : initialRoom();
+  }
+
+  onClose(session) {
+    this.sockets.delete(session.socket);
+    const player = this.battle.players.find((item) => item.id === session.account.id);
+    if (!player) return;
+    const stillConnected = [...this.sockets.values()].some((other) => other.account.id === session.account.id);
+    if (stillConnected) return;
+    if (this.battle.gameOver || this.battle.players.length < POKI_MAX_PLAYERS) {
+      this.queue = this.queue
+        .catch((error) => console.error('Poki close queue failed:', error))
+        .then(async () => {
+          this.removePlayer(session.account.id);
+          await this.save();
+          this.broadcastState();
+        })
+        .catch((error) => console.error('Poki close persistence failed:', error));
+    } else {
+      player.connected = false;
+      this.queue = this.queue
+        .catch((error) => console.error('Poki close queue failed:', error))
+        .then(async () => {
+          await this.save();
+          this.broadcastState();
+        })
+        .catch((error) => console.error('Poki close persistence failed:', error));
+    }
+  }
+
+  viewFor(accountId) {
+    return {
+      type: 'state',
+      you: accountId,
+      roomCode: this.code,
+      battle: {
+        players: this.battle.players.map((player) => ({ id: player.id, monster: player.monster, name: player.name, connected: player.connected })),
+        board: this.battle.board,
+        hp: this.battle.hp,
+        mana: this.battle.mana,
+        shield: this.battle.shield,
+        turn: this.battle.turn,
+        lastAction: this.battle.lastAction,
+        gameOver: this.battle.gameOver,
+        winner: this.battle.winner,
+        loser: this.battle.loser,
+      },
+    };
+  }
+
+  broadcastState() { for (const session of this.sockets.values()) this.send(session.socket, this.viewFor(session.account.id)); }
+  error(session, message, fatal = false) { this.send(session.socket, { type: 'error', message, ...(fatal ? { fatal: true } : {}) }); }
+  send(socket, message) { try { socket.send(JSON.stringify(message)); } catch { /* closed socket */ } }
+  async save() { await this.state.storage.put('poki', this.battle); }
+}
+
+function addPokiPlayer(battle, accountId, monster, name) {
+  const state = { ...battle, players: [...battle.players] };
+  state.players.push({ id: accountId, monster, name, connected: true });
+  state.hp = { ...state.hp, [accountId]: MONSTERS[monster].maxHp };
+  state.mana = { ...state.mana, [accountId]: 0 };
+  state.shield = { ...state.shield, [accountId]: 0 };
+  return state;
+}
+
 async function roomSummary(env, code, accountId) {
   const headers = new Headers({ 'x-internal-room': '1' });
   if (accountId) headers.set('x-account-id', accountId);
@@ -483,6 +759,18 @@ async function roomSummary(env, code, accountId) {
     // Report an unavailable table as non-joinable instead of exposing a broken entry.
   }
   return { code, players: 0, maxPlayers: MAX_PLAYERS, phase: 'unavailable', canJoin: false };
+}
+
+async function pokiRoomSummary(env, code, accountId) {
+  const headers = new Headers({ 'x-internal-room': '1' });
+  if (accountId) headers.set('x-account-id', accountId);
+  try {
+    const response = await env.POKI_ROOMS.get(env.POKI_ROOMS.idFromName(code)).fetch(new Request(`https://pokiroom/summary?code=${code}`, { headers }));
+    if (response.ok) return response.json();
+  } catch {
+    // Report an unavailable table as non-joinable instead of exposing a broken entry.
+  }
+  return { code, players: 0, maxPlayers: POKI_MAX_PLAYERS, phase: 'unavailable', canJoin: false, gameOver: false };
 }
 
 async function accountForRequest(request, env) {
@@ -509,7 +797,25 @@ export default {
       const rooms = await Promise.all(ROOM_CODES.map((code) => roomSummary(env, code, account?.id || null)));
       return json({ rooms });
     }
+    if (url.pathname === '/api/poki/rooms' && request.method === 'GET') {
+      const account = request.headers.get('cookie') ? await accountForRequest(request, env) : null;
+      const rooms = await Promise.all(POKI_ROOM_CODES.map((code) => pokiRoomSummary(env, code, account?.id || null)));
+      return json({ rooms });
+    }
     if (url.pathname === '/api/health') return json({ ok: true, service: 'game', game: 'tienlen' });
+    const pokiCode = pokiRoomCode(url.pathname);
+    if (pokiCode) {
+      if (!POKI_ROOM_CODES.includes(pokiCode.toUpperCase())) return json({ error: 'Không tìm thấy bàn này.' }, 404);
+      if (request.headers.get('Upgrade') !== 'websocket') return json({ error: 'WebSocket required' }, 426);
+      const account = await accountForRequest(request, env);
+      if (!account) return json({ error: 'Bạn cần đăng nhập để chơi.' }, 401);
+      const headers = new Headers(request.headers);
+      headers.set('x-account-id', account.id);
+      headers.set('x-account-username', account.username);
+      headers.set('x-account-display-name', account.displayName);
+      headers.set('x-account-coins', String(account.coins));
+      return env.POKI_ROOMS.get(env.POKI_ROOMS.idFromName(pokiCode.toUpperCase())).fetch(new Request(request, { headers }));
+    }
     const code = roomCode(url.pathname);
     if (code) {
       if (request.headers.get('Upgrade') !== 'websocket') return json({ error: 'WebSocket required' }, 426);
@@ -521,6 +827,9 @@ export default {
       headers.set('x-account-display-name', account.displayName);
       headers.set('x-account-coins', String(account.coins));
       return env.ROOMS.get(env.ROOMS.idFromName(code)).fetch(new Request(request, { headers }));
+    }
+    if (url.pathname === '/poki' || url.pathname === '/poki/') {
+      return env.ASSETS.fetch(new Request(new URL('/poki/index.html', url), request));
     }
     return env.ASSETS.fetch(request);
   },

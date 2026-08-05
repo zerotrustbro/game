@@ -1,0 +1,61 @@
+/* Poki Duel — Game Room integration styles: hub link, account, 5-table lobby, auth, toast. */
+.hub-link{display:inline-block;color:#8fc9dd;font:800 10px 'Barlow Condensed';letter-spacing:.16em;text-decoration:none;border:1px solid #5e8ba244;padding:5px 9px;margin-bottom:10px;transition:.18s}.hub-link:hover{color:var(--gold);border-color:var(--gold)}
+.connecting .brand{text-align:center}
+.arena-header .brand{display:flex;flex-direction:column;align-items:flex-start;line-height:1.1}
+.arena-header .brand .hub-link{margin-bottom:7px}
+
+.account-area{border-top:1px solid #6792a644;padding:12px 0 4px}
+.mini-label{display:block;color:var(--cyan);font:800 10px 'Barlow Condensed';letter-spacing:.18em;margin-bottom:8px}
+.account-chip{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;background:#071522;border:1px solid #719db4}
+.account-chip b{font:800 14px 'Barlow Condensed';letter-spacing:.05em;color:#eaf7ff}
+.account-action{border:0;background:transparent;color:#9db6c7;font:800 10px 'Barlow Condensed';letter-spacing:.12em;cursor:pointer;padding:4px}
+.account-action:hover{color:var(--gold)}
+.login-link{width:100%;padding:11px;border:1px solid var(--gold);background:#0a1a2a;color:var(--gold);font:800 11px 'Barlow Condensed';letter-spacing:.12em;cursor:pointer;transition:.18s}
+.login-link:hover{background:#122d43}
+
+.tables-eyebrow{margin-top:18px}
+.table-list{display:grid;gap:6px;max-height:240px;overflow:auto}
+.table-row{display:grid;grid-template-columns:58px 1fr auto;align-items:center;gap:8px;width:100%;text-align:left;padding:9px 10px;background:#0a1c2c;border:1px solid #4e7a92;border-left:3px solid #4e7a92;color:#c6dfed;cursor:pointer;transition:.15s}
+.table-row:hover:not(:disabled){border-color:var(--gold);border-left-color:var(--gold);background:#122d43}
+.table-row.selected{border-color:var(--gold);border-left-color:var(--gold);background:linear-gradient(90deg,#315b6588,transparent);box-shadow:inset 0 0 22px #82eaff22}
+.table-row.locked{opacity:.5;cursor:not-allowed;filter:grayscale(.4)}
+.table-code{font:800 13px 'Barlow Condensed';letter-spacing:.1em;color:var(--gold)}
+.table-copy b{display:block;font:800 12px 'Barlow Condensed';letter-spacing:.06em}
+.table-copy small{color:#83aec4;font-size:9px}
+.table-status{font:800 9px 'Barlow Condensed';letter-spacing:.08em;color:#74ef9a;white-space:nowrap}
+.table-row.locked .table-status{color:#9db6c7}
+.table-loading{color:#83aec4;font-size:11px;padding:10px 0}
+
+.auth-backdrop{position:fixed;z-index:30;inset:0;background:#02060be6;backdrop-filter:blur(4px)}
+.auth-panel{position:fixed;z-index:31;top:50%;left:50%;transform:translate(-50%,-50%);width:min(420px,calc(100% - 30px));max-height:88vh;overflow:auto;padding:26px 24px 24px;border:1px solid #9dd8e9;background:linear-gradient(160deg,#123854,#091a2c);box-shadow:0 20px 80px #000c}
+.auth-panel .eyebrow{margin-bottom:8px}
+.auth-panel h2{margin:0 0 8px;font:900 clamp(24px,5vw,32px)/1 'Barlow Condensed';letter-spacing:.03em}
+.auth-lead{color:#b7d0dc;font-size:12px;line-height:1.6;margin:0 0 16px}
+.auth-close{position:absolute;top:10px;right:14px;border:0;background:transparent;color:#9db6c7;font-size:24px;cursor:pointer;line-height:1}
+.auth-close:hover{color:var(--gold)}
+.auth-tabs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px}
+.auth-tab{padding:10px;border:1px solid #4e7a92;background:#0a1c2c;color:#9db6c7;font:800 11px 'Barlow Condensed';letter-spacing:.14em;cursor:pointer}
+.auth-tab.active{border-color:var(--gold);color:var(--gold);background:#122d43}
+.auth-form{display:grid;gap:10px}
+.field-label{color:#8fc9dd;font:800 10px 'Barlow Condensed';letter-spacing:.16em}
+.text-input{width:100%;padding:11px 12px;background:#071522;border:1px solid #4e7a92;color:#f5fbff;font:600 13px Manrope;border-radius:0}
+.text-input:focus{outline:0;border-color:var(--cyan)}
+.auth-submit{margin-top:8px;padding:13px;border:0;background:var(--gold);color:#1c2330;font:900 14px 'Barlow Condensed';letter-spacing:.1em;cursor:pointer;box-shadow:0 5px #a26132}
+.auth-submit b{float:right;font-size:19px;line-height:13px}
+.auth-error{min-height:18px;margin-top:12px;color:#ff818f;font-size:11px}
+.modal-open{overflow:hidden}
+
+.leave{margin-left:6px;border:1px solid #c96a5e;background:#2a1418cc;color:#ffb3a8;padding:9px 11px;font:800 10px 'Barlow Condensed';letter-spacing:.1em;cursor:pointer}
+.leave:hover{border-color:#ff6f65;color:#fff}
+.result-leave{display:block;margin:10px auto 0;padding:11px 22px;border:1px solid #4e7a92;background:transparent;color:#9db6c7;font:800 12px 'Barlow Condensed';letter-spacing:.1em;cursor:pointer}
+.result-leave:hover{color:#fff;border-color:#9db6c7}
+
+.toast{position:fixed;z-index:40;left:50%;bottom:26px;transform:translate(-50%,16px);opacity:0;pointer-events:none;max-width:min(520px,calc(100% - 30px));padding:12px 18px;background:#0e2436;border:1px solid #719db4;color:#d5f5ff;font:700 12px Manrope;transition:.25s}
+.toast.visible{opacity:1;transform:translate(-50%,0)}
+.toast.error{border-color:#ff6f65;color:#ffd5cf}
+
+@media(max-width:900px){
+  .table-list{max-height:none}
+  .table-row{grid-template-columns:52px 1fr}
+  .arena-header .brand .hub-link{font-size:9px}
+}

@@ -1,0 +1,352 @@
+import { GEM_LABEL, MONSTERS } from './game.js';
+import { attackSound, creatureVoice, defeatSound, rewardSound, setSoundEnabled, soundEnabled, unlockAudio } from './audio.js';
+import { POKI_ROOM_CODES, isPokiRoomCode, pokiGamePath, pokiRoomUrl, pokiTableLabel } from './routes.js';
+
+const app = document.querySelector('#app');
+const authPanel = document.querySelector('#authPanel');
+const authBackdrop = document.querySelector('#authBackdrop');
+const toast = document.querySelector('#toast');
+
+let conn; // { ws, id, monster, code }
+let state; // battle state broadcast by the server
+let tables = [];
+let user = null;
+let selectedTable = '';
+let selected;
+let notice = '';
+let effect = '';
+let preview = 'emberfox';
+let lastActionKey = '';
+let lastResultKey = '';
+let receivedRoomState = false;
+let displayedBoard;
+let boardAnimationToken = 0;
+let pendingTable = null;
+
+const monsterIds = Object.keys(MONSTERS);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const art = (id, alt = MONSTERS[id].name) => `<img src="/poki/creatures/${id}.webp" alt="${esc(alt)}">`;
+const normalizeRoom = (value) => String(value || '').trim().toUpperCase();
+
+function skillSummary(id) {
+  const s = MONSTERS[id].skill;
+  return `${s.damage} sát thương${s.healing ? ` · +${s.healing} HP` : ''}${s.manaDrain ? ` · −${s.manaDrain} Mana` : ''}${s.selfDamage ? ` · phản lực ${s.selfDamage}` : ''}${s.shield ? ` · khiên ${s.shield}` : ''}`;
+}
+
+function showToast(message, tone = '') {
+  toast.textContent = message;
+  toast.className = `toast visible ${tone}`;
+  clearTimeout(showToast.timer);
+  showToast.timer = setTimeout(() => { toast.className = 'toast'; }, 3200);
+}
+
+function tableRow(table, index) {
+  const players = Math.max(0, Number(table.players) || 0);
+  const full = players >= 2;
+  const joinable = Boolean(table.canJoin);
+  const locked = !joinable;
+  const status = table.phase === 'unavailable'
+    ? 'TẠM LỖI'
+    : table.gameOver
+      ? (full ? 'KẾT THÚC' : 'KẾT THÚC · CÒN CHỖ')
+      : full ? 'ĐANG ĐẤU' : players === 1 ? 'CHỜ ĐỐI THỦ' : 'CÒN CHỖ';
+  const isSelected = selectedTable === table.code;
+  return `<button class="table-row ${isSelected ? 'selected' : ''} ${locked ? 'locked' : ''}" type="button" data-table="${esc(table.code)}" ${locked ? 'disabled' : ''}><span class="table-code">${esc(table.code)}</span><span class="table-copy"><b>${pokiTableLabel(index)}</b><small>${players}/2 người · ${status}</small></span><span class="table-status">${status}</span></button>`;
+}
+
+function renderTables() {
+  const list = document.querySelector('#tableList');
+  if (!list) return;
+  if (!tables.length) {
+    list.innerHTML = '<p class="table-loading">Đang tải danh sách bàn…</p>';
+    return;
+  }
+  if (selectedTable && !tables.find((table) => table.code === selectedTable && table.canJoin)) {
+    selectedTable = tables.find((table) => table.code === selectedTable && table.canJoin)?.code || '';
+  }
+  list.innerHTML = tables.map(tableRow).join('');
+  list.querySelectorAll('[data-table]').forEach((button) => {
+    button.onclick = () => { selectedTable = button.dataset.table; renderTables(); };
+  });
+}
+
+async function loadTables() {
+  try {
+    const response = await fetch('/api/poki/rooms', { cache: 'no-store' });
+    if (!response.ok) throw new Error('room list unavailable');
+    const data = await response.json();
+    tables = Array.isArray(data.rooms) ? data.rooms : [];
+  } catch {
+    tables = [];
+  }
+}
+
+function renderLobby() {
+  const requested = normalizeRoom(new URLSearchParams(location.search).get('room') || '');
+  if (isPokiRoomCode(requested)) selectedTable = requested;
+  const monster = MONSTERS[preview];
+  const accountBlock = user
+    ? `<div class="account-area"><span class="mini-label">ĐANG ĐĂNG NHẬP</span><div class="account-chip"><b>${esc(user.displayName)}</b><button class="account-action" id="logout" type="button">ĐĂNG XUẤT</button></div></div>`
+    : `<div class="account-area"><span class="mini-label">GAME ROOM ACCOUNT</span><button class="login-link" id="login" type="button">🔑 ĐĂNG NHẬP / TẠO TÀI KHOẢN</button></div>`;
+  app.innerHTML = `<main class="select-screen">
+    <div class="select-top"><a class="hub-link" href="/">← GAME ROOM</a><div class="brand">POKI <i>DUEL</i></div><div class="select-meta">ORIGINAL CREATURE BATTLE <b>${monsterIds.length} / ${monsterIds.length}</b><button class="sound-toggle" id="sound" aria-label="Bật hoặc tắt âm thanh">${soundEnabled() ? '🔊 ÂM THANH' : '🔇 TẮT ÂM'}</button></div></div>
+    <section class="select-layout">
+      <nav class="roster"><p class="eyebrow">CHỌN CHIẾN BINH</p>${monsterIds.map((id) => {
+        const m = MONSTERS[id];
+        return `<button class="roster-item ${id === preview ? 'active' : ''}" data-monster="${id}"><span>${art(id)}</span><b>${m.name}</b><small>${m.skill.name}</small></button>`;
+      }).join('')}</nav>
+      <section class="showcase monster-${preview}"><div class="showcase-backdrop"></div><div class="creature-large">${art(preview)}</div><div class="creature-plaque"><span>POKI CREATURE / 0${monsterIds.indexOf(preview) + 1}</span><h1>${MONSTERS[preview].name}</h1><p>${skillSummary(preview)}</p></div></section>
+      <aside class="loadout"><p class="eyebrow">HỒ SƠ CHIẾN ĐẤU</p><h2>${monster.skill.name}</h2><p class="loadout-copy">Một chiến binh nguyên bản với nhịp chơi riêng. Ghép Kiếm để tấn công, Tim để hồi HP, Mana để mở tuyệt kỹ.</p><div class="stat"><span>SỨC MẠNH TUYỆT KỸ</span><b>${monster.skill.damage}</b></div><div class="stat"><span>HP KHỞI ĐẦU</span><b>${monster.maxHp}</b></div><div class="stat"><span>MANA KHỞI ĐẦU</span><b>0</b></div><div class="loadout-rule"><i>⚔</i><span>Ghép 3 gem cùng loại<br><small>Không có kỹ năng chủ động trước khi đủ 100 Mana.</small></span></div>
+      ${accountBlock}
+      <p class="eyebrow tables-eyebrow">CHỌN BÀN · 1VS1 · ${POKI_ROOM_CODES.length} BÀN</p>
+      <div class="table-list" id="tableList"></div>
+      <button class="enter" id="enter">VÀO TRẬN VỚI ${monster.name.toUpperCase()} <span>→</span></button></aside>
+    </section><footer><span>HP RIÊNG TỪNG POKI</span><span>•</span><span>MANA 0 → 100</span><span>•</span><span>3 GEM BATTLE SYSTEM</span></footer>
+  </main>`;
+  renderTables();
+  document.querySelectorAll('.roster-item').forEach((button) => {
+    button.onclick = () => { preview = button.dataset.monster; creatureVoice(preview); renderLobby(); };
+  });
+  document.querySelector('#sound').onclick = () => { setSoundEnabled(!soundEnabled()); renderLobby(); };
+  document.querySelector('#enter').addEventListener('click', enterTable);
+  document.querySelector('#login')?.addEventListener('click', openAuth);
+  document.querySelector('#logout')?.addEventListener('click', async () => {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    user = null;
+    renderLobby();
+  });
+}
+
+function enterTable() {
+  unlockAudio();
+  if (!selectedTable) return showToast('Hãy chọn một bàn để vào trận.', 'error');
+  if (!user) {
+    pendingTable = selectedTable;
+    openAuth();
+    return;
+  }
+  connect(selectedTable, preview);
+}
+
+function connect(code, monster) {
+  conn = { ws: null, id: null, monster, code };
+  receivedRoomState = false;
+  lastActionKey = '';
+  lastResultKey = '';
+  displayedBoard = undefined;
+  boardAnimationToken++;
+  history.replaceState({}, '', pokiRoomUrl(code));
+  app.innerHTML = `<main class="connecting"><div class="brand">POKI <i>DUEL</i></div><div class="loader"></div><p>ĐANG MỞ ĐẤU TRƯỜNG…</p></main>`;
+  const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/poki/room/${code}`);
+  conn.ws = ws;
+  ws.onopen = () => ws.send(JSON.stringify({ type: 'join', monster }));
+  ws.onmessage = (event) => {
+    let message;
+    try { message = JSON.parse(event.data); } catch { return; }
+    if (message.type === 'error') {
+      notice = message.message;
+      selected = undefined;
+      if (message.fatal) {
+        showToast(message.message, 'error');
+        state = undefined;
+        conn?.ws?.close();
+        conn = undefined;
+        history.replaceState({}, '', pokiGamePath());
+        loadTables().then(renderLobby);
+        return;
+      }
+      if (state) { render(); return; }
+      showToast(message.message, 'error');
+      state = undefined;
+      conn = undefined;
+      loadTables().then(renderLobby);
+      return;
+    }
+    if (message.type !== 'state') return;
+    conn.id = message.you;
+    state = message.battle;
+    notice = '';
+    if (!receivedRoomState) { receivedRoomState = true; render(); return; }
+    playEffect();
+  };
+  ws.onerror = () => undefined;
+  ws.onclose = () => {
+    if (conn?.ws !== ws) return;
+    if (state) setTimeout(() => { if (conn?.ws === ws) connect(code, monster); }, 1600);
+    else { conn = undefined; loadTables().then(renderLobby); }
+  };
+}
+
+function fighter(player, mine) {
+  if (!player) return `<aside class="fighter waiting"><div class="waiting-mark">+</div><b>ĐANG CHỜ ĐỐI THỦ</b><small>Gửi link bàn để bắt đầu trận đấu</small></aside>`;
+  const monster = MONSTERS[player.monster];
+  const maxHp = monster.maxHp;
+  const hp = state.hp[player.id] ?? maxHp;
+  const mana = state.mana[player.id] ?? 0;
+  const shield = state.shield[player.id] ?? 0;
+  return `<aside class="fighter ${mine ? 'mine' : 'opponent'} monster-${player.monster}"><div class="fighter-label"><span>${mine ? 'BẠN' : 'ĐỐI THỦ'}</span><i>${esc(player.name || (mine ? 'Bạn' : 'Đối thủ'))}</i></div><div class="fighter-art">${art(player.monster)}</div><div class="fighter-name"><h2>${monster.name}</h2><small>${monster.skill.name}</small></div><div class="meter-row"><span>HP</span><b>${hp}<em>/ ${maxHp}</em></b></div><div class="meter hp"><i style="width:${hp / maxHp * 100}%"></i></div><div class="meter-row mana-label"><span>MANA</span><b>${mana}<em>/ 100</em></b></div><div class="meter mana"><i style="width:${mana}%"></i></div>${shield ? `<div class="shield">⬡ SHIELD ${shield}</div>` : ''}${mine ? `<button class="special" id="special" ${mana < 100 || displayedBoard ? 'disabled' : ''}><span>✦</span><b>${monster.skill.name.toUpperCase()}</b><small>${displayedBoard ? 'ĐANG HIỂN THỊ COMBO' : mana < 100 ? 'CẦN ĐỦ 100 MANA' : `${skillSummary(player.monster)} · KẾT THÚC LƯỢT`}</small></button>` : ''}</aside>`;
+}
+
+function render() {
+  if (!state || !conn) return;
+  const me = state.players.find((p) => p.id === conn.id);
+  const foe = state.players.find((p) => p.id !== conn.id);
+  const ready = state.players.length === 2;
+  const mine = state.players[state.turn % Math.max(1, state.players.length)]?.id === conn.id;
+  const board = displayedBoard ?? state.board;
+  const action = notice || (state.gameOver ? 'TRẬN ĐẤU ĐÃ KẾT THÚC' : !ready ? 'GỬI LINK BÀN CHO NGƯỜI THỨ HAI' : effect || (mine ? 'LƯỢT CỦA BẠN · CHỌN HAI GEM KỀ NHAU' : 'ĐỐI THỦ ĐANG TÍNH NƯỚC ĐI'));
+  const result = state.gameOver ? `<div class="result-screen"><div class="result-box"><p>${state.winner === conn.id ? 'VICTORY' : 'DEFEAT'}</p><h1>${state.winner === conn.id ? 'BẠN ĐÃ CHIẾN THẮNG' : 'POKI THÚ CỦA BẠN ĐÃ GỤC NGÃ'}</h1><span>${state.winner === conn.id ? 'Đối thủ đã về 0 HP.' : 'HP của bạn đã về 0.'}</span><button id="new-match">ĐẤU LẠI VỚI ĐỐI THỦ →</button><button class="result-leave" id="result-leave">RỜI BÀN</button></div></div>` : '';
+  app.innerHTML = `<main class="arena monster-${conn.monster} ${state.gameOver ? 'match-ended' : ''}"><header class="arena-header"><div class="brand"><a class="hub-link" href="/">← GAME ROOM</a>POKI <i>DUEL</i></div><div class="room-chip">BÀN <b>${esc(conn.code)}</b></div><div class="arena-actions"><button class="sound-toggle" id="sound" aria-label="Bật hoặc tắt âm thanh">${soundEnabled() ? '🔊' : '🔇'}</button><button class="copy" id="copy">COPY INVITE LINK</button><button class="leave" id="leave">RỜI BÀN</button></div></header><section class="battle-stage"><div class="stage-grid"></div><div class="stage-light"></div>${fighter(me, true)}<section class="board-zone"><div class="turn-banner ${mine ? 'your-turn' : ''}"><span>${mine ? 'YOUR TURN' : 'OPPONENT TURN'}</span><b>${action}</b></div><div class="board ${mine && ready && !displayedBoard ? 'playable' : ''}">${board.map((row, y) => row.map((gem, x) => `<button class="gem ${gem} ${selected?.x === x && selected?.y === y ? 'selected' : ''}" data-x="${x}" data-y="${y}"><span>${GEM_LABEL[gem]}</span></button>`).join('')).join('')}</div><div class="legend"><span class="sword">⚔ <b>SWORD</b><small>ATTACK</small></span><span class="heart">♥ <b>HEART</b><small>HEAL</small></span><span class="mana">✦ <b>MANA</b><small>CHARGE</small></span></div></section>${fighter(foe, false)}</section>${state.lastAction?.special ? '<div class="ultimate-flash">✦ ULTIMATE ✦</div>' : ''}<div class="battle-fx ${effect.includes('SWORD') ? 'sword-fx' : ''} ${effect.includes('HEAL') ? 'heal-fx' : ''} ${effect.includes('MANA') ? 'mana-fx' : ''}">${effect.includes('SWORD') ? '⚔' : effect.includes('HEAL') ? '+♥' : effect.includes('MANA') ? '+✦' : ''}</div>${result}</main>`;
+  document.querySelector('#copy')?.addEventListener('click', () => navigator.clipboard.writeText(location.href));
+  document.querySelector('#sound')?.addEventListener('click', () => { setSoundEnabled(!soundEnabled()); render(); });
+  document.querySelector('#special')?.addEventListener('click', () => { unlockAudio(); conn.ws.send(JSON.stringify({ type: 'special' })); });
+  document.querySelector('#new-match')?.addEventListener('click', () => { unlockAudio(); conn.ws.send(JSON.stringify({ type: 'restart' })); });
+  document.querySelector('#result-leave')?.addEventListener('click', leaveTable);
+  document.querySelector('#leave')?.addEventListener('click', leaveTable);
+  document.querySelectorAll('.gem').forEach((button) => { button.onclick = () => move({ x: Number(button.dataset.x), y: Number(button.dataset.y) }); });
+}
+
+function leaveTable() {
+  if (conn?.ws?.readyState === WebSocket.OPEN) conn.ws.send(JSON.stringify({ type: 'leave' }));
+  state = undefined;
+  conn?.ws?.close();
+  conn = undefined;
+  history.replaceState({}, '', pokiGamePath());
+  loadTables().then(renderLobby);
+}
+
+function move(point) {
+  unlockAudio();
+  if (!state || !conn || displayedBoard || state.players.length !== 2 || state.players[state.turn % 2]?.id !== conn.id) return;
+  if (!selected) { selected = point; render(); return; }
+  if (Math.abs(selected.x - point.x) + Math.abs(selected.y - point.y) !== 1) { selected = point; render(); return; }
+  conn.ws.send(JSON.stringify({ type: 'move', from: selected, to: point }));
+  selected = undefined;
+  notice = 'ĐANG XỬ LÝ COMBO…';
+  render();
+}
+
+function playEffect() {
+  const action = state?.lastAction;
+  if (!action) { effect = ''; render(); return; }
+  const animationToken = ++boardAnimationToken;
+  const frames = action.frames ?? [];
+  displayedBoard = frames[0]?.board;
+  if (frames.length) {
+    frames.slice(1).forEach((frame, index) => window.setTimeout(() => {
+      if (animationToken !== boardAnimationToken) return;
+      displayedBoard = frame.board;
+      render();
+    }, (index + 1) * 240));
+    window.setTimeout(() => {
+      if (animationToken !== boardAnimationToken) return;
+      displayedBoard = undefined;
+      render();
+    }, frames.length * 240);
+  }
+  const actionKey = `${state.turn}:${action.player}:${action.special ? 'special' : 'move'}:${action.damage}:${action.healing}:${action.mana}:${action.cleared}`;
+  if (actionKey !== lastActionKey) {
+    lastActionKey = actionKey;
+    const attacker = state.players.find((player) => player.id === action.player);
+    if (attacker && (action.special || action.damage)) attackSound(attacker.monster, Boolean(action.special));
+    else if (action.healing) rewardSound('heal');
+    else if (action.mana) rewardSound('mana');
+  }
+  if (state?.gameOver) {
+    const resultKey = `${state.winner}:${state.loser}`;
+    if (resultKey !== lastResultKey) { lastResultKey = resultKey; defeatSound(state.winner === conn.id); }
+  }
+  const combo = action.cascades > 1 ? ` · COMBO x${action.cascades} · ${action.cleared} GEM` : '';
+  effect = action.special ? `✦ ${action.skillName?.toUpperCase()} · ${action.damage} DAMAGE` : action.damage ? `SWORD · ${action.damage} DAMAGE${combo}` : action.healing ? `HEAL · +${action.healing} HP${combo}` : action.mana ? `MANA · +${action.mana}${combo}` : combo.trim();
+  render();
+  window.setTimeout(() => { effect = ''; render(); }, 1500);
+}
+
+// ---- Shared Game Room account ----
+function openAuth() {
+  document.querySelector('#authError').textContent = '';
+  authPanel.classList.remove('hidden');
+  authBackdrop.classList.remove('hidden');
+  document.body.classList.add('modal-open');
+}
+
+function closeAuth() {
+  authPanel.classList.add('hidden');
+  authBackdrop.classList.add('hidden');
+  document.body.classList.remove('modal-open');
+}
+
+async function authRequest(path, body) {
+  const response = await fetch(`/api/auth${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Không thể xử lý tài khoản.');
+  return data.user;
+}
+
+async function loadAccount() {
+  try {
+    const response = await fetch('/api/auth/me');
+    if (response.ok) user = (await response.json()).user;
+  } catch {
+    user = null;
+  }
+}
+
+async function finishAuth(account) {
+  user = account;
+  closeAuth();
+  await loadTables();
+  if (pendingTable) {
+    const code = pendingTable;
+    pendingTable = null;
+    connect(code, preview);
+    return;
+  }
+  renderLobby();
+}
+
+document.querySelector('#loginTab').addEventListener('click', () => {
+  document.querySelector('#loginTab').classList.add('active');
+  document.querySelector('#registerTab').classList.remove('active');
+  document.querySelector('#loginForm').classList.remove('hidden');
+  document.querySelector('#registerForm').classList.add('hidden');
+  document.querySelector('#authTitle').textContent = 'Đăng nhập để chơi';
+});
+document.querySelector('#registerTab').addEventListener('click', () => {
+  document.querySelector('#registerTab').classList.add('active');
+  document.querySelector('#loginTab').classList.remove('active');
+  document.querySelector('#registerForm').classList.remove('hidden');
+  document.querySelector('#loginForm').classList.add('hidden');
+  document.querySelector('#authTitle').textContent = 'Tạo tài khoản';
+});
+document.querySelector('#authClose').addEventListener('click', closeAuth);
+authBackdrop.addEventListener('click', closeAuth);
+document.querySelector('#loginForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try { await finishAuth(await authRequest('/login', { username: document.querySelector('#loginUsername').value, password: document.querySelector('#loginPassword').value })); }
+  catch (error) { document.querySelector('#authError').textContent = error.message; }
+});
+document.querySelector('#registerForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    await finishAuth(await authRequest('/register', {
+      username: document.querySelector('#registerUsername').value,
+      displayName: document.querySelector('#registerDisplayName').value,
+      password: document.querySelector('#registerPassword').value,
+    }));
+  } catch (error) { document.querySelector('#authError').textContent = error.message; }
+});
+
+// ---- Boot ----
+(async function boot() {
+  await loadAccount();
+  await loadTables();
+  renderLobby();
+  setInterval(async () => {
+    if (!document.querySelector('#tableList')) return;
+    if (document.querySelector('#app .select-screen')) {
+      await loadTables();
+      renderTables();
+    }
+  }, 5000);
+})();

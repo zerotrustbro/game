@@ -18,6 +18,10 @@ class_name = "Room"
 name = "ACCOUNTS"
 class_name = "AccountStore"
 
+[[durable_objects.bindings]]
+name = "POKI_ROOMS"
+class_name = "PokiRoom"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Room"]
@@ -25,6 +29,10 @@ new_sqlite_classes = ["Room"]
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["AccountStore"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["PokiRoom"]
 
 [observability]
 enabled = false
