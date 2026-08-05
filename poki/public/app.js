@@ -305,22 +305,11 @@ async function finishAuth(account) {
   renderLobby();
 }
 
-document.querySelector('#loginTab').addEventListener('click', () => {
-  document.querySelector('#loginTab').classList.add('active');
-  document.querySelector('#registerTab').classList.remove('active');
-  document.querySelector('#loginForm').classList.remove('hidden');
-  document.querySelector('#registerForm').classList.add('hidden');
-  document.querySelector('#authTitle').textContent = 'Đăng nhập để chơi';
-});
-document.querySelector('#registerTab').addEventListener('click', () => {
-  document.querySelector('#registerTab').classList.add('active');
-  document.querySelector('#loginTab').classList.remove('active');
-  document.querySelector('#registerForm').classList.remove('hidden');
-  document.querySelector('#loginForm').classList.add('hidden');
-  document.querySelector('#authTitle').textContent = 'Tạo tài khoản';
-});
 document.querySelector('#authClose').addEventListener('click', closeAuth);
 authBackdrop.addEventListener('click', closeAuth);
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !authPanel.classList.contains('hidden')) closeAuth();
+});
 document.querySelector('#loginForm').addEventListener('submit', async (event) => {
   event.preventDefault();
   try { await finishAuth(await authRequest('/login', { username: document.querySelector('#loginUsername').value, password: document.querySelector('#loginPassword').value })); }

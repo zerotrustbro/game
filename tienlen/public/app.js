@@ -52,11 +52,8 @@ function setConnection(label, connected = false) {
 function updateAccountUi() {
   $('accountButton').textContent = state.user ? `${state.user.displayName} · ${state.user.coins} xu` : 'Tài khoản';
   $('accountSummary').classList.toggle('hidden', !state.user);
-  $('loginForm').classList.toggle('hidden', Boolean(state.user));
-  $('registerForm').classList.toggle('hidden', Boolean(state.user));
-  $('loginTab').classList.toggle('hidden', Boolean(state.user));
-  $('registerTab').classList.toggle('hidden', Boolean(state.user));
-  $('authTitle').textContent = state.user ? 'Tài khoản của bạn' : 'Đăng nhập để chơi';
+  $('authColumns').classList.toggle('hidden', Boolean(state.user));
+  $('authTitle').textContent = state.user ? 'Tài khoản của bạn' : 'Tài khoản Game Room';
   $('accountName').textContent = state.user?.displayName || '—';
   $('accountCoins').textContent = state.user?.coins ?? 0;
   $('guestGate').classList.toggle('hidden', Boolean(state.user));
@@ -341,13 +338,8 @@ $('soundButton').addEventListener('click', () => {
 $('accountButton').addEventListener('click', openAuth);
 $('authClose').addEventListener('click', closeAuth);
 authBackdrop.addEventListener('click', closeAuth);
-$('loginTab').addEventListener('click', () => {
-  $('loginTab').classList.add('active'); $('registerTab').classList.remove('active');
-  $('loginForm').classList.remove('hidden'); $('registerForm').classList.add('hidden'); $('authTitle').textContent = 'Đăng nhập để chơi';
-});
-$('registerTab').addEventListener('click', () => {
-  $('registerTab').classList.add('active'); $('loginTab').classList.remove('active');
-  $('registerForm').classList.remove('hidden'); $('loginForm').classList.add('hidden'); $('authTitle').textContent = 'Tạo tài khoản';
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !authPanel.classList.contains('hidden')) closeAuth();
 });
 async function finishAuth(user) {
   state.user = user;
