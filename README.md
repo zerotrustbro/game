@@ -17,7 +17,7 @@ A Cloudflare Workers game hub with **no accounts and no coins** — type a nickn
 
 - `/` — Game Room ecosystem hub (tiles for all three games).
 - `/tienlen` — Tiến Lên lobby.
-- `/tienlen/room/ABC123` — shareable Tiến Lên room link.
+- `/tienlen/room/BAN01` — fixed Tiến Lên table link (BAN01–BAN05).
 - `/poki` — Poki Duel lobby: pick a creature and one of five 1v1 tables.
 - `/poki/?room=POKI01` — deep link to a specific Poki table.
 - `/xo` — XO lobby: five 1v1 tables.

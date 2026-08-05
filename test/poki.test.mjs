@@ -77,7 +77,7 @@ test('a reconnecting player keeps their seat and the battle in progress', async 
   assert.equal(room.battle.players.length, 2);
   assert.equal(room.battle.turn, 3);
   assert.equal(room.battle.board, firstBoard);
-  assert.equal(room.battle.players.find((player) => player.id === 'player-alice').monster, 'voltwing');
+  assert.equal(room.battle.players.find((player) => player.id === 'player-alice').monster, 'emberfox');
 });
 
 test('an offline player can be replaced so a 1v1 table never gets stuck', async () => {
@@ -96,6 +96,52 @@ test('an offline player can be replaced so a 1v1 table never gets stuck', async 
   assert.ok(room.battle.players.some((player) => player.id === 'player-carol'));
   assert.ok(!room.battle.gameOver);
   assert.equal(room.battle.turn, 0);
+});
+
+test('a stale offline waiting seat is replaced by the next player', async () => {
+  const room = await pokiRoom();
+  const alice = session('player-alice', 'Alice');
+  await room.join(alice, { id: 'player-alice', name: 'Alice', monster: 'emberfox' });
+  room.battle.players[0].connected = false;
+  assert.equal(room.summary().canJoin, true);
+  const bob = session('player-bob', 'Bob');
+  await room.join(bob, { id: 'player-bob', name: 'Bob', monster: 'stonehorn' });
+  assert.deepEqual(room.battle.players.map((player) => player.id), ['player-bob']);
+});
+
+test('a connected player can take over the turn of an offline opponent', async () => {
+  const room = await pokiRoom();
+  const alice = session('player-alice', 'Alice');
+  const bob = session('player-bob', 'Bob');
+  await room.join(alice, { id: 'player-alice', name: 'Alice', monster: 'emberfox' });
+  await room.join(bob, { id: 'player-bob', name: 'Bob', monster: 'stonehorn' });
+
+  // Bob's turn, but Bob is offline — Alice may act in his place.
+  room.battle.turn = 1;
+  room.battle.players.find((player) => player.id === 'player-bob').connected = false;
+  const first = validMoves(room.battle.board)[0];
+  assert.ok(first);
+  await room.move(alice, { from: first.from, to: first.to });
+
+  assert.ok(room.battle.lastAction, 'the takeover move was processed');
+  assert.equal(room.battle.lastAction.player, 'player-alice');
+});
+
+test('an offline opponent does not block a special cast', async () => {
+  const room = await pokiRoom();
+  const alice = session('player-alice', 'Alice');
+  const bob = session('player-bob', 'Bob');
+  await room.join(alice, { id: 'player-alice', name: 'Alice', monster: 'emberfox' });
+  await room.join(bob, { id: 'player-bob', name: 'Bob', monster: 'stonehorn' });
+  room.battle.turn = 1;
+  room.battle.players.find((player) => player.id === 'player-bob').connected = false;
+  room.battle.mana['player-alice'] = 100;
+
+  await room.special(alice);
+
+  assert.ok(room.battle.lastAction?.special);
+  assert.equal(room.battle.lastAction.player, 'player-alice');
+  assert.equal(room.battle.mana['player-alice'], 0);
 });
 
 test('moves require the active player and advance the turn on a valid swap', async () => {
@@ -242,4 +288,21 @@ test('the poki app shell is served from the assets binding', async () => {
     assert.equal(response.status, 200);
     assert.equal(await response.text(), 'ASSET:/poki/index.html');
   }
+});
+
+test('a socket that never joined cannot restart a finished Poki match', async () => {
+  const room = await pokiRoom();
+  const alice = session('player-alice', 'Alice');
+  const bob = session('player-bob', 'Bob');
+  const intruder = session('player-intruder', 'Intruder');
+  await room.join(alice, { id: 'player-alice', name: 'Alice', monster: 'emberfox' });
+  await room.join(bob, { id: 'player-bob', name: 'Bob', monster: 'stonehorn' });
+  room.battle.gameOver = true;
+  room.battle.winner = 'player-alice';
+  room.battle.loser = 'player-bob';
+
+  await room.restart(intruder);
+
+  assert.equal(last(intruder).type, 'error');
+  assert.equal(room.battle.gameOver, true);
 });

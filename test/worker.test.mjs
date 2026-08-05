@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker, { Room } from '../worker/index.js';
+import { dealGame } from '../tienlen/public/engine.js';
 
 function createSocket() {
   return {
@@ -170,5 +171,82 @@ test('legacy saved rooms drop account fields during normalization', async () => 
   assert.ok(room.room.players.every((player) => !('accountId' in player) && !('coins' in player) && !('username' in player)));
   assert.equal(room.room.players[0].name, 'Host');
   assert.equal(room.getPersisted().players[0].name, 'Host');
+  assert.ok(!('settlement' in room.getPersisted()));
   assert.equal(room.room.hostId, legacyId);
+});
+
+test('legacy game players drop account fields during normalization', async () => {
+  const room = await createRoom({}, {
+    phase: 'game',
+    hostId: 'host-player',
+    players: [
+      { id: 'host-player', name: 'Host', avatar: 1, connected: true },
+      { id: 'guest-player', name: 'Guest', avatar: 2, connected: true },
+    ],
+    game: {
+      accountId: 'account-game', coins: 50, settlement: { status: 'done' },
+      players: [
+        { id: 'host-player', name: 'Host', avatar: 1, hand: ['3s'], accountId: 'account-host', xu: 20 },
+        { id: 'guest-player', name: 'Guest', avatar: 2, hand: ['4s'], coins: 10 },
+      ],
+      turnIndex: 0, currentPlay: null, passCount: 0, mustStart: true, gameOver: false, winner: null,
+    },
+    roomCode: 'BAN01', roundId: 'ROUND1',
+  });
+  assert.ok(room.room.game.players.every((player) => Object.keys(player).sort().join(',') === 'avatar,hand,id,name'));
+  assert.ok(!('accountId' in room.getPersisted().game) && !('coins' in room.getPersisted().game));
+  assert.ok(room.getPersisted().game.players.every((player) => !('accountId' in player) && !('xu' in player) && !('coins' in player)));
+});
+
+test('disconnecting from the lobby frees the seat and reassigns the host', async () => {
+  const room = await createRoom();
+  const host = session('host-player');
+  const guest = session('guest-player');
+  room.sockets.set(host.socket, host);
+  room.sockets.set(guest.socket, guest);
+  await room.join(host, { id: 'host-player', name: 'Host', avatar: 1 });
+  await room.join(guest, { id: 'guest-player', name: 'Guest', avatar: 1 });
+
+  room.onClose(host);
+  await room.queue;
+
+  assert.deepEqual(room.room.players.map((player) => player.id), ['guest-player']);
+  assert.equal(room.room.hostId, 'guest-player');
+  assert.equal(room.room.phase, 'lobby');
+  assert.equal(room.summary('new-player').canJoin, true);
+});
+
+test('leaving a finished match returns the remaining player to a joinable lobby', async () => {
+  const room = await createRoom();
+  const host = session('host-player');
+  const guest = session('guest-player');
+  room.sockets.set(host.socket, host);
+  room.sockets.set(guest.socket, guest);
+  await room.join(host, { id: 'host-player', name: 'Host', avatar: 1 });
+  await room.join(guest, { id: 'guest-player', name: 'Guest', avatar: 1 });
+  room.room.phase = 'game';
+  room.room.game = { players: [{ id: 'host-player', hand: [] }, { id: 'guest-player', hand: ['3s'] }], gameOver: true, winner: 'host-player' };
+
+  room.onClose(guest);
+  await room.queue;
+
+  assert.equal(room.room.phase, 'lobby');
+  assert.deepEqual(room.room.players.map((player) => player.id), ['host-player']);
+  assert.equal(room.summary('new-player').canJoin, true);
+});
+
+test('an explicit leave removes a player and closes only that socket', async () => {
+  const room = await createRoom();
+  const host = session('host-player');
+  const guest = session('guest-player');
+  room.sockets.set(host.socket, host);
+  room.sockets.set(guest.socket, guest);
+  await room.join(host, { id: 'host-player', name: 'Host', avatar: 1 });
+  await room.join(guest, { id: 'guest-player', name: 'Guest', avatar: 1 });
+
+  await room.leave(host);
+
+  assert.deepEqual(room.room.players.map((player) => player.id), ['guest-player']);
+  assert.equal(room.sockets.has(host.socket), false);
+  assert.equal(room.sockets.has(guest.socket), true);
 });

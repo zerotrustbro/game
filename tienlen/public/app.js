@@ -1,5 +1,5 @@
 import { cardRank, cardSort, cardSuit } from './engine.js';
-import { gamePath, parseRoute, roomPath } from './routes.js';
+import { gamePath, isRoomCode, parseRoute, roomPath } from './routes.js';
 
 const AVATARS = Array.from({ length: 8 }, (_, index) => `/assets/avatars/avatar-${String(index + 1).padStart(2, '0')}.webp`);
 const SUIT_NAMES = { s: 'bích', c: 'chuồn', d: 'rô', h: 'cơ' };
@@ -16,6 +16,8 @@ const state = {
   rooms: [],
   selected: new Set(),
   sound: localStorage.getItem('tienlen-sound') !== 'off',
+  allowReconnect: false,
+  reconnectTimer: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -90,9 +92,24 @@ async function loadRooms() {
   renderRoomList();
 }
 
+function cancelReconnect() {
+  clearTimeout(state.reconnectTimer);
+  state.reconnectTimer = null;
+}
+
+function scheduleReconnect(code) {
+  cancelReconnect();
+  state.reconnectTimer = setTimeout(() => {
+    state.reconnectTimer = null;
+    if (state.allowReconnect && state.roomCode === code && state.room) connect(code);
+  }, 1600);
+}
+
 function connect(code, { push = false } = {}) {
   state.roomCode = code.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
-  if (!/^[A-Z0-9]{4,8}$/.test(state.roomCode)) return showToast('Mã phòng cần có 4–8 ký tự.', 'error');
+  if (!isRoomCode(state.roomCode)) return showToast('Hãy chọn một trong năm bàn đang mở.', 'error');
+  state.allowReconnect = true;
+  cancelReconnect();
   history[push ? 'pushState' : 'replaceState']({}, '', roomPath(state.roomCode));
   if (state.socket) state.socket.close();
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -100,10 +117,12 @@ function connect(code, { push = false } = {}) {
   state.socket = socket;
   setConnection('Đang kết nối…');
   socket.addEventListener('open', () => {
+    if (state.socket !== socket) return;
     setConnection('Đã kết nối', true);
     socket.send(JSON.stringify({ type: 'join', id: state.id, name: state.name || 'Người chơi', avatar: state.avatar }));
   });
   socket.addEventListener('message', (event) => {
+    if (state.socket !== socket) return;
     try {
       handleMessage(JSON.parse(event.data));
     } catch {
@@ -111,9 +130,13 @@ function connect(code, { push = false } = {}) {
     }
   });
   socket.addEventListener('close', () => {
-    if (state.socket === socket) setConnection('Mất kết nối');
+    if (state.socket !== socket) return;
+    setConnection('Mất kết nối');
+    if (state.allowReconnect && state.room) scheduleReconnect(state.roomCode);
   });
-  socket.addEventListener('error', () => showToast('Không thể kết nối phòng này.', 'error'));
+  socket.addEventListener('error', () => {
+    if (state.socket === socket) showToast('Không thể kết nối phòng này.', 'error');
+  });
 }
 
 function send(message) {
@@ -123,7 +146,14 @@ function send(message) {
 
 function handleMessage(message) {
   if (message.type === 'connected') return;
-  if (message.type === 'error') return showToast(message.message, 'error');
+  if (message.type === 'error') {
+    showToast(message.message, 'error');
+    if (message.fatal) {
+      history.replaceState({}, '', gamePath());
+      showGameLobby();
+    }
+    return;
+  }
   if (message.type !== 'state') return;
   if (message.you) {
     state.playerId = message.you;
@@ -138,6 +168,9 @@ function handleMessage(message) {
 }
 
 function showHub() {
+  state.allowReconnect = false;
+  cancelReconnect();
+  if (state.socket?.readyState === WebSocket.OPEN) state.socket.send(JSON.stringify({ type: 'leave' }));
   state.socket?.close();
   state.socket = null;
   state.room = null;
@@ -149,6 +182,9 @@ function showHub() {
 }
 
 function showGameLobby(roomCode = null) {
+  state.allowReconnect = false;
+  cancelReconnect();
+  if (state.socket?.readyState === WebSocket.OPEN) state.socket.send(JSON.stringify({ type: 'leave' }));
   state.socket?.close();
   state.socket = null;
   state.room = null;
@@ -206,7 +242,7 @@ function renderRoom() {
   $('roomTitle').textContent = room.gameOver ? `${room.winner === room.you ? 'Bạn thắng ván này' : 'Ván đã kết thúc'}` : room.phase === 'game' ? (isTurn ? 'Đến lượt bạn' : 'Đang trong ván') : 'Đang chờ người chơi';
   $('turnKicker').textContent = room.gameOver ? 'KẾT QUẢ' : room.phase === 'game' ? (isTurn ? 'LƯỢT CỦA BẠN' : `LƯỢT ${room.players.find((player) => player.id === room.turnPlayerId)?.name || ''}`) : 'PHÒNG CHỜ';
   renderCurrentPlay(room);
-  $('tableStatus').textContent = room.gameOver ? `${room.winner === room.you ? 'Chúc mừng — bạn là người hết bài trước.' : `${esc(room.players.find((player) => player.id === room.winner)?.name || 'Đối thủ')} đã thắng.`}` : room.phase === 'game' ? (isTurn ? 'Chọn bài trên tay rồi đánh.' : 'Theo dõi lượt của đối thủ.') : (players.length < 2 ? 'Cần ít nhất 2 người để bắt đầu.' : (isHost ? 'Bạn có thể bắt đầu ván.' : 'Đợi chủ phòng bắt đầu ván.'));
+  $('tableStatus').textContent = room.gameOver ? `${room.winner === room.you ? 'Chúc mừng — bạn là người hết bài trước.' : `${room.players.find((player) => player.id === room.winner)?.name || 'Đối thủ'} đã thắng.`}` : room.phase === 'game' ? (isTurn ? 'Chọn bài trên tay rồi đánh.' : 'Theo dõi lượt của đối thủ.') : (players.length < 2 ? 'Cần ít nhất 2 người để bắt đầu.' : (isHost ? 'Bạn có thể bắt đầu ván.' : 'Đợi chủ phòng bắt đầu ván.'));
   renderHand(room, isTurn);
 }
 

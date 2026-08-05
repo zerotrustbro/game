@@ -18,6 +18,7 @@ let lastResultKey = '';
 let receivedRoomState = false;
 let displayedBoard;
 let boardAnimationToken = 0;
+let effectToken = 0;
 
 const id = localStorage.getItem('player-id') || crypto.randomUUID();
 localStorage.setItem('player-id', id);
@@ -131,8 +132,12 @@ function connect(code, monster) {
   app.innerHTML = `<main class="connecting"><div class="brand">POKI <i>DUEL</i></div><div class="loader"></div><p>ĐANG MỞ ĐẤU TRƯỜNG…</p></main>`;
   const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/poki/room/${code}`);
   conn.ws = ws;
-  ws.onopen = () => ws.send(JSON.stringify({ type: 'join', id, name: nickname(), monster }));
+  ws.onopen = () => {
+    if (conn?.ws !== ws) return;
+    ws.send(JSON.stringify({ type: 'join', id, name: nickname(), monster }));
+  };
   ws.onmessage = (event) => {
+    if (conn?.ws !== ws) return;
     let message;
     try { message = JSON.parse(event.data); } catch { return; }
     if (message.type === 'error') {
@@ -184,18 +189,36 @@ function render() {
   const me = state.players.find((p) => p.id === conn.id);
   const foe = state.players.find((p) => p.id !== conn.id);
   const ready = state.players.length === 2;
-  const mine = state.players[state.turn % Math.max(1, state.players.length)]?.id === conn.id;
+  const active = state.players[state.turn % Math.max(1, state.players.length)];
+  // A disconnected opponent's turn belongs to the player who is still here.
+  const mine = active ? active.id === conn.id || (active.connected === false && Boolean(me)) : false;
   const board = displayedBoard ?? state.board;
   const action = notice || (state.gameOver ? 'TRẬN ĐẤU ĐÃ KẾT THÚC' : !ready ? 'GỬI LINK BÀN CHO NGƯỜI THỨ HAI' : effect || (mine ? 'LƯỢT CỦA BẠN · CHỌN HAI GEM KỀ NHAU' : 'ĐỐI THỦ ĐANG TÍNH NƯỚC ĐI'));
   const result = state.gameOver ? `<div class="result-screen"><div class="result-box"><p>${state.winner === conn.id ? 'VICTORY' : 'DEFEAT'}</p><h1>${state.winner === conn.id ? 'BẠN ĐÃ CHIẾN THẮNG' : 'POKI THÚ CỦA BẠN ĐÃ GỤC NGÃ'}</h1><span>${state.winner === conn.id ? 'Đối thủ đã về 0 HP.' : 'HP của bạn đã về 0.'}</span><button id="new-match">ĐẤU LẠI VỚI ĐỐI THỦ →</button><button class="result-leave" id="result-leave">RỜI BÀN</button></div></div>` : '';
   app.innerHTML = `<main class="arena monster-${conn.monster} ${state.gameOver ? 'match-ended' : ''}"><header class="arena-header"><div class="brand"><a class="hub-link" href="/">← GAME ROOM</a>POKI <i>DUEL</i></div><div class="room-chip">BÀN <b>${esc(conn.code)}</b></div><div class="arena-actions"><button class="sound-toggle" id="sound" aria-label="Bật hoặc tắt âm thanh">${soundEnabled() ? '🔊' : '🔇'}</button><button class="copy" id="copy">COPY INVITE LINK</button><button class="leave" id="leave">RỜI BÀN</button></div></header><section class="battle-stage"><div class="stage-grid"></div><div class="stage-light"></div>${fighter(me, true)}<section class="board-zone"><div class="turn-banner ${mine ? 'your-turn' : ''}"><span>${mine ? 'YOUR TURN' : 'OPPONENT TURN'}</span><b>${action}</b></div><div class="board ${mine && ready && !displayedBoard ? 'playable' : ''}">${board.map((row, y) => row.map((gem, x) => `<button class="gem ${gem} ${selected?.x === x && selected?.y === y ? 'selected' : ''}" data-x="${x}" data-y="${y}"><span>${GEM_LABEL[gem]}</span></button>`).join('')).join('')}</div><div class="legend"><span class="sword">⚔ <b>SWORD</b><small>ATTACK</small></span><span class="heart">♥ <b>HEART</b><small>HEAL</small></span><span class="mana">✦ <b>MANA</b><small>CHARGE</small></span></div></section>${fighter(foe, false)}</section>${state.lastAction?.special ? '<div class="ultimate-flash">✦ ULTIMATE ✦</div>' : ''}<div class="battle-fx ${effect.includes('SWORD') ? 'sword-fx' : ''} ${effect.includes('HEAL') ? 'heal-fx' : ''} ${effect.includes('MANA') ? 'mana-fx' : ''}">${effect.includes('SWORD') ? '⚔' : effect.includes('HEAL') ? '+♥' : effect.includes('MANA') ? '+✦' : ''}</div>${result}</main>`;
-  document.querySelector('#copy')?.addEventListener('click', () => navigator.clipboard.writeText(location.href));
+  document.querySelector('#copy')?.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(location.href);
+      showToast('Đã copy link mời.');
+    } catch {
+      showToast('Không thể copy link trên trình duyệt này.', 'error');
+    }
+  });
   document.querySelector('#sound')?.addEventListener('click', () => { setSoundEnabled(!soundEnabled()); render(); });
-  document.querySelector('#special')?.addEventListener('click', () => { unlockAudio(); conn.ws.send(JSON.stringify({ type: 'special' })); });
-  document.querySelector('#new-match')?.addEventListener('click', () => { unlockAudio(); conn.ws.send(JSON.stringify({ type: 'restart' })); });
+  document.querySelector('#special')?.addEventListener('click', () => { unlockAudio(); send({ type: 'special' }); });
+  document.querySelector('#new-match')?.addEventListener('click', () => { unlockAudio(); send({ type: 'restart' }); });
   document.querySelector('#result-leave')?.addEventListener('click', leaveTable);
   document.querySelector('#leave')?.addEventListener('click', leaveTable);
   document.querySelectorAll('.gem').forEach((button) => { button.onclick = () => move({ x: Number(button.dataset.x), y: Number(button.dataset.y) }); });
+}
+
+function send(message) {
+  if (conn?.ws?.readyState !== WebSocket.OPEN) {
+    showToast('Kết nối chưa sẵn sàng.', 'error');
+    return false;
+  }
+  conn.ws.send(JSON.stringify(message));
+  return true;
 }
 
 function leaveTable() {
@@ -209,10 +232,13 @@ function leaveTable() {
 
 function move(point) {
   unlockAudio();
-  if (!state || !conn || displayedBoard || state.players.length !== 2 || state.players[state.turn % 2]?.id !== conn.id) return;
+  if (!state || !conn) return;
+  const active = state.players[state.turn % Math.max(1, state.players.length)];
+  const myTurn = active?.id === conn.id || (active?.connected === false && state.players.some((p) => p.id === conn.id));
+  if (displayedBoard || state.players.length !== 2 || !myTurn) return;
   if (!selected) { selected = point; render(); return; }
   if (Math.abs(selected.x - point.x) + Math.abs(selected.y - point.y) !== 1) { selected = point; render(); return; }
-  conn.ws.send(JSON.stringify({ type: 'move', from: selected, to: point }));
+  if (!send({ type: 'move', from: selected, to: point })) return;
   selected = undefined;
   notice = 'ĐANG XỬ LÝ COMBO…';
   render();
@@ -220,6 +246,7 @@ function move(point) {
 
 function playEffect() {
   const action = state?.lastAction;
+  const currentEffectToken = ++effectToken;
   if (!action) { effect = ''; render(); return; }
   const animationToken = ++boardAnimationToken;
   const frames = action.frames ?? [];
@@ -251,7 +278,11 @@ function playEffect() {
   const combo = action.cascades > 1 ? ` · COMBO x${action.cascades} · ${action.cleared} GEM` : '';
   effect = action.special ? `✦ ${action.skillName?.toUpperCase()} · ${action.damage} DAMAGE` : action.damage ? `SWORD · ${action.damage} DAMAGE${combo}` : action.healing ? `HEAL · +${action.healing} HP${combo}` : action.mana ? `MANA · +${action.mana}${combo}` : combo.trim();
   render();
-  window.setTimeout(() => { effect = ''; render(); }, 1500);
+  window.setTimeout(() => {
+    if (currentEffectToken !== effectToken) return;
+    effect = '';
+    render();
+  }, 1500);
 }
 
 // ---- Boot ----

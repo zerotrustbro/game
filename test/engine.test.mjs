@@ -38,6 +38,12 @@ test('deals exactly thirteen cards to each player', () => {
   assert.equal(new Set(dealt.players.flatMap((player) => player.hand)).size, 26);
 });
 
+test('keeps deals finite when the random source is non-finite', () => {
+  const game = dealGame(Array.from({ length: 4 }, (_, index) => ({ id: `player-${index}`, name: `P${index}`, avatar: 1 })), () => Number.NaN);
+  assert.equal(game.players.reduce((count, player) => count + player.hand.length, 0), 52);
+  assert.ok(game.players.every((player) => player.hand.every((card) => typeof card === 'string')));
+});
+
 test('plays only owned cards, advances the turn, and removes cards', () => {
   const game = gameWith([['3s', '4s'], ['5s']], { mustStart: true });
   const result = playMove(game, 'a', ['3s']);

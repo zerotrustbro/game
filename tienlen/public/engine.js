@@ -2,6 +2,11 @@ const RANKS = ['3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A', '2']
 const SUITS = ['s', 'c', 'd', 'h']; // bích, chuồn, rô, cơ
 const SUIT_ORDER = Object.fromEntries(SUITS.map((suit, index) => [suit, index]));
 const RANK_VALUE = Object.fromEntries(RANKS.map((rank, index) => [rank, index]));
+const randomIndex = (random, length) => {
+  const value = Number(random());
+  const safe = Number.isFinite(value) ? value : 0;
+  return Math.min(length - 1, Math.max(0, Math.floor(safe * length)));
+};
 const COMBO_NAMES = Object.freeze({
   single: 'Lá lẻ',
   pair: 'Đôi',
@@ -115,7 +120,7 @@ export function createGame(players, options = {}) {
 export function dealGame(players, random = Math.random) {
   const deck = createDeck();
   for (let i = deck.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(random() * (i + 1));
+    const j = randomIndex(random, i + 1);
     [deck[i], deck[j]] = [deck[j], deck[i]];
   }
   return createGame(players.map((player, index) => ({
@@ -176,6 +181,14 @@ export function passMove(game, playerId) {
     next.turnIndex = nextPlayerIndex(next, index);
   }
   return { ok: true, game: next, action: { type: 'pass', playerId, reset: next.currentPlay === null } };
+}
+
+// Move the lead to the next player without touching the trick or pass counts.
+// Used when the player who must lead has disconnected and the game must continue.
+export function skipLead(game) {
+  const next = structuredClone(game);
+  next.turnIndex = nextPlayerIndex(next, next.turnIndex);
+  return next;
 }
 
 export function describeComboForUi(combo) {

@@ -1,8 +1,8 @@
-import { dealGame, passMove, playMove } from '../tienlen/public/engine.js';
+import { dealGame, passMove, playMove, skipLead } from '../tienlen/public/engine.js';
 import { ROOM_CODES } from '../tienlen/public/routes.js';
 import { applyBattleDamage, applySpecial, applySpecialTurn, createBoard, initialRoom, MONSTERS, resolveSwap, SIZE } from '../poki/public/game.js';
 import { POKI_ROOM_CODES } from '../poki/public/routes.js';
-import { addPlayer as xoAddPlayer, initialGame, makeMove as xoMove, restartGame as xoRestart } from '../xo/public/game.js';
+import { addPlayer as xoAddPlayer, evaluateBoard as xoEvaluateBoard, initialGame, makeMove as xoMove, restartGame as xoRestart } from '../xo/public/game.js';
 import { XO_ROOM_CODES } from '../xo/public/routes.js';
 
 const MAX_PLAYERS = 4;
@@ -34,18 +34,18 @@ function cleanAvatar(value) {
 }
 
 function roomCode(pathname) {
-  const match = pathname.match(/^\/api\/room\/([A-Z0-9]{4,8})$/);
-  return match?.[1] || null;
+  const match = pathname.match(/^\/api\/room\/([A-Za-z0-9]{4,8})$/);
+  return match?.[1]?.toUpperCase() || null;
 }
 
 function pokiRoomCode(pathname) {
-  const match = pathname.match(/^\/api\/poki\/room\/([A-Z0-9-]{1,12})$/);
-  return match?.[1] || null;
+  const match = pathname.match(/^\/api\/poki\/room\/([A-Za-z0-9-]{1,12})$/);
+  return match?.[1]?.toUpperCase() || null;
 }
 
 function xoRoomCode(pathname) {
-  const match = pathname.match(/^\/api\/xo\/room\/([A-Z0-9]{4,8})$/);
-  return match?.[1] || null;
+  const match = pathname.match(/^\/api\/xo\/room\/([A-Za-z0-9]{4,8})$/);
+  return match?.[1]?.toUpperCase() || null;
 }
 
 function emptyRoom() {
@@ -56,10 +56,23 @@ function normalizeRoom(saved) {
   if (!saved || typeof saved !== 'object') return { room: emptyRoom(), changed: false };
   const room = { ...emptyRoom(), ...saved };
   let changed = false;
+  for (const key of ['accountId', 'coins', 'xu', 'settlement']) {
+    if (key in room) {
+      delete room[key];
+      changed = true;
+    }
+  }
+  if (!['lobby', 'game'].includes(room.phase)) {
+    room.phase = 'lobby';
+    room.game = null;
+    room.roundId = null;
+    changed = true;
+  }
   const usedIds = new Set();
   const canonicalByOriginal = new Map();
-  const savedPlayers = Array.isArray(saved.players) ? saved.players : [];
-  const players = savedPlayers.map((player = {}) => {
+  const savedPlayers = Array.isArray(saved.players) ? saved.players.slice(0, MAX_PLAYERS) : [];
+  const players = savedPlayers.map((rawPlayer = {}) => {
+    const player = rawPlayer && typeof rawPlayer === 'object' ? rawPlayer : {};
     const originalId = player.id;
     let id = typeof originalId === 'string' && ID_PATTERN.test(originalId) && !usedIds.has(originalId) ? originalId : crypto.randomUUID();
     while (usedIds.has(id)) id = crypto.randomUUID();
@@ -69,20 +82,37 @@ function normalizeRoom(saved) {
     return { id, name: cleanName(player.name), avatar: cleanAvatar(player.avatar), connected: player.connected !== false };
   });
   if (!Array.isArray(saved.players)) changed = true;
+  if (Array.isArray(saved.players) && saved.players.length !== players.length) changed = true;
   room.players = players;
 
-  const hostId = canonicalByOriginal.get(saved.hostId) || players[0]?.id || null;
+  const requestedHost = canonicalByOriginal.get(saved.hostId) || saved.hostId;
+  const hostId = players.some((player) => player.id === requestedHost && player.connected)
+    ? requestedHost
+    : players.find((player) => player.connected)?.id || players[0]?.id || null;
   if (room.hostId !== hostId) changed = true;
   room.hostId = hostId;
 
   if (saved.game && typeof saved.game === 'object') {
     const game = { ...saved.game };
+    for (const key of ['accountId', 'coins', 'xu', 'settlement']) {
+      if (key in game) {
+        delete game[key];
+        changed = true;
+      }
+    }
     const savedGamePlayers = Array.isArray(saved.game.players) ? saved.game.players : [];
-    game.players = savedGamePlayers.map((player = {}, index) => {
+    game.players = savedGamePlayers.map((rawPlayer = {}, index) => {
+      const player = rawPlayer && typeof rawPlayer === 'object' ? rawPlayer : {};
       const member = player.accountId ? players.find((candidate) => candidate.id === player.accountId) : players[index];
       const id = member?.id || canonicalByOriginal.get(player.id) || player.id;
-      if (id !== player.id) changed = true;
-      return { ...player, id };
+      const normalizedPlayer = {
+        id,
+        name: cleanName(player.name),
+        avatar: cleanAvatar(player.avatar),
+        hand: Array.isArray(player.hand) ? [...player.hand] : [],
+      };
+      if (id !== player.id || normalizedPlayer.name !== player.name || normalizedPlayer.avatar !== player.avatar || !Array.isArray(player.hand) || Object.keys(player).some((key) => !['id', 'name', 'avatar', 'hand'].includes(key))) changed = true;
+      return normalizedPlayer;
     });
     if (game.winner) {
       const winner = canonicalByOriginal.get(game.winner) || game.players.find((player) => player.id === game.winner)?.id || game.winner;
@@ -95,6 +125,16 @@ function normalizeRoom(saved) {
       game.currentPlay = { ...game.currentPlay, playerId };
     }
     room.game = game;
+  }
+  if (room.phase === 'game' && room.game && (!Array.isArray(room.game.players) || room.game.players.length < 2)) {
+    room.phase = 'lobby';
+    room.game = null;
+    room.roundId = null;
+    changed = true;
+  } else if (room.phase === 'lobby' && room.game) {
+    room.game = null;
+    room.roundId = null;
+    changed = true;
   }
 
   return { room, changed };
@@ -125,7 +165,7 @@ export class Room {
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     server.accept();
-    const session = { socket: server, playerId: null };
+    const session = { socket: server, playerId: null, closed: false };
     this.sockets.set(server, session);
     server.addEventListener('message', (event) => {
       this.queue = this.queue.catch(() => {}).then(() => this.onMessage(session, event.data));
@@ -151,6 +191,7 @@ export class Room {
         case 'play': await this.play(session, message.cards); break;
         case 'pass': await this.pass(session); break;
         case 'restart': await this.restart(session); break;
+        case 'leave': await this.leave(session); break;
         default: this.send(session.socket, { type: 'error', message: 'Yêu cầu không hợp lệ.' });
       }
     } catch {
@@ -160,6 +201,7 @@ export class Room {
 
   async join(session, message) {
     const id = cleanId(message.id);
+    if (session.playerId && session.playerId !== id) return this.error(session, 'Kết nối này đã gắn với người chơi khác.', true);
     const existing = this.room.players.find((player) => player.id === id);
     if (!existing && this.room.players.length >= MAX_PLAYERS) return this.send(session.socket, { type: 'error', message: 'Phòng đã đủ 4 người.' });
     if (this.room.phase === 'game' && !existing) return this.send(session.socket, { type: 'error', message: 'Ván đã bắt đầu, hãy vào ván kế tiếp.' });
@@ -181,14 +223,26 @@ export class Room {
   async start(session) {
     if (!this.isKnown(session) || this.room.hostId !== session.playerId) return this.error(session, 'Chỉ chủ phòng mới có thể bắt đầu.');
     if (this.room.phase !== 'lobby') return this.error(session, 'Ván đang diễn ra.');
-    if (this.room.players.length < 2) return this.error(session, 'Cần ít nhất 2 người để bắt đầu.');
+    const connectedPlayers = this.room.players.filter((player) => player.connected);
+    if (connectedPlayers.length < 2) return this.error(session, 'Cần ít nhất 2 người đang kết nối để bắt đầu.');
+    if (connectedPlayers.length !== this.room.players.length) {
+      this.room.players = connectedPlayers;
+      this.room.hostId = connectedPlayers.find((player) => player.connected)?.id || null;
+    }
     await this.beginRound();
   }
 
   async play(session, cards) {
     if (!this.isKnown(session) || this.room.phase !== 'game') return this.error(session, 'Chưa có ván đang chơi.');
+    const advanced = this.advancePastOffline();
     const result = playMove(this.room.game, session.playerId, cards);
-    if (!result.ok) return this.error(session, result.error);
+    if (!result.ok) {
+      if (advanced) {
+        await this.save();
+        this.broadcastState();
+      }
+      return this.error(session, result.error);
+    }
     this.room.game = result.game;
     await this.save();
     this.broadcastState(result.action);
@@ -196,8 +250,15 @@ export class Room {
 
   async pass(session) {
     if (!this.isKnown(session) || this.room.phase !== 'game') return this.error(session, 'Chưa có ván đang chơi.');
+    const advanced = this.advancePastOffline();
     const result = passMove(this.room.game, session.playerId);
-    if (!result.ok) return this.error(session, result.error);
+    if (!result.ok) {
+      if (advanced) {
+        await this.save();
+        this.broadcastState();
+      }
+      return this.error(session, result.error);
+    }
     this.room.game = result.game;
     await this.save();
     this.broadcastState(result.action);
@@ -207,6 +268,15 @@ export class Room {
     if (!this.isKnown(session) || this.room.hostId !== session.playerId) return this.error(session, 'Chỉ chủ phòng mới có thể chơi ván mới.');
     if (!this.room.game?.gameOver) return this.error(session, 'Ván hiện tại chưa kết thúc.');
     await this.beginRound();
+  }
+
+  async leave(session) {
+    if (this.isKnown(session)) this.removePlayer(session.playerId);
+    session.playerId = null;
+    this.sockets.delete(session.socket);
+    await this.save();
+    this.broadcastState();
+    try { session.socket.close(1000, 'bye'); } catch { /* closed */ }
   }
 
   gamePlayers() {
@@ -222,6 +292,8 @@ export class Room {
   }
 
   onClose(session) {
+    if (session.closed) return;
+    session.closed = true;
     this.sockets.delete(session.socket);
     if (session.playerId) {
       const player = this.room?.players.find((item) => item.id === session.playerId);
@@ -232,11 +304,18 @@ export class Room {
         this.queue = this.queue
           .catch((error) => console.error('Room queue failed:', error))
           .then(async () => {
-            // Everyone left: reset the table so newcomers can play.
-            if (this.room.players.length && !this.room.players.some((item) => item.connected)) {
+            // A lobby seat or a finished match is no longer a reconnect window.
+            // Remove that player so the table can accept a fresh challenger.
+            if (this.room.phase !== 'game' || this.room.game?.gameOver) {
+              this.removePlayer(session.playerId);
+            } else if (!this.room.players.some((item) => item.connected)) {
+              // Everyone left: reset the table so newcomers can play.
               const code = this.room.roomCode;
               this.room = emptyRoom();
               this.room.roomCode = code;
+            } else {
+              // Someone is still here: keep the game moving past disconnected players.
+              this.advancePastOffline();
             }
             await this.save();
             this.broadcastState();
@@ -246,8 +325,48 @@ export class Room {
     }
   }
 
+  removePlayer(playerId) {
+    const code = this.room.roomCode;
+    const players = this.room.players.filter((player) => player.id !== playerId);
+    if (!players.some((player) => player.connected)) {
+      this.room = emptyRoom();
+      this.room.roomCode = code;
+      return;
+    }
+    this.room = emptyRoom();
+    this.room.roomCode = code;
+    this.room.players = players;
+    this.room.hostId = players.find((player) => player.connected)?.id || null;
+  }
+
   isKnown(session) { return Boolean(session.playerId && this.room.players.some((player) => player.id === session.playerId)); }
-  error(session, message) { this.send(session.socket, { type: 'error', message }); }
+  error(session, message, fatal = false) { this.send(session.socket, { type: 'error', message, ...(fatal ? { fatal: true } : {}) }); }
+
+  // Skip the turns of players who disconnected mid-game so a table never stalls.
+  // A disconnected player who would just pass is passed automatically; one who
+  // must lead simply yields the lead to the next player.
+  advancePastOffline() {
+    const game = this.room.game;
+    if (this.room.phase !== 'game' || !game || game.gameOver) return false;
+    if (!this.room.players.some((player) => player.connected)) return false; // everyone offline → reset branch handles it
+    let changed = false;
+    let guard = 0;
+    while (guard++ < this.room.players.length) {
+      const current = this.room.game;
+      const turnPlayer = current.players[current.turnIndex];
+      const seat = turnPlayer && this.room.players.find((player) => player.id === turnPlayer.id);
+      if (!turnPlayer || !seat || seat.connected) break;
+      if (current.currentPlay) {
+        const result = passMove(current, turnPlayer.id);
+        if (!result.ok) break;
+        this.room.game = result.game;
+      } else {
+        this.room.game = skipLead(current);
+      }
+      changed = true;
+    }
+    return changed;
+  }
 
   viewFor(playerId, action) {
     const game = this.room.game;
@@ -267,7 +386,7 @@ export class Room {
 // ---------- Poki Duel ----------
 
 function freshPokiBattle(players) {
-  const battle = initialRoom();
+  const battle = { ...initialRoom(), gameOver: false, winner: undefined, loser: undefined, lastAction: undefined };
   for (const player of players) battle.players.push({ id: player.id, monster: player.monster, name: player.name, connected: player.connected });
   for (const player of battle.players) {
     battle.hp[player.id] = MONSTERS[player.monster].maxHp;
@@ -279,28 +398,51 @@ function freshPokiBattle(players) {
 
 function normalizePokiRoom(saved) {
   if (!saved || typeof saved !== 'object') return { room: initialRoom(), changed: false };
-  const players = Array.isArray(saved.players)
-    ? saved.players.slice(0, POKI_MAX_PLAYERS).map((player = {}) => ({
-        id: String(player.id || crypto.randomUUID()).slice(0, 64),
-        monster: POKI_MONSTER_IDS.includes(player.monster) ? player.monster : 'emberfox',
-        name: cleanName(player.name),
-        connected: player.connected !== false,
-      }))
-    : [];
+  let changed = !Array.isArray(saved.players);
+  const usedIds = new Set();
+  const players = (Array.isArray(saved.players) ? saved.players : []).slice(0, POKI_MAX_PLAYERS).map((raw = {}) => {
+    const player = raw && typeof raw === 'object' ? raw : {};
+    const rawId = typeof player.id === 'string' ? player.id.trim() : '';
+    let id = ID_PATTERN.test(rawId) && !usedIds.has(rawId) ? rawId : crypto.randomUUID();
+    while (usedIds.has(id)) id = crypto.randomUUID();
+    usedIds.add(id);
+    const normalized = {
+      id,
+      monster: POKI_MONSTER_IDS.includes(player.monster) ? player.monster : 'emberfox',
+      name: cleanName(player.name),
+      connected: player.connected !== false,
+    };
+    if (id !== player.id || normalized.monster !== player.monster || normalized.name !== player.name || normalized.connected !== player.connected || 'accountId' in player || 'coins' in player || 'username' in player) changed = true;
+    return normalized;
+  });
+  if (Array.isArray(saved.players) && saved.players.length !== players.length) changed = true;
   const boardOk = Array.isArray(saved.board) && saved.board.length === SIZE
     && saved.board.every((row) => Array.isArray(row) && row.length === SIZE && row.every((gem) => POKI_GEMS.has(gem)));
-  const battle = { players, board: boardOk ? saved.board : createBoard(), hp: {}, mana: {}, shield: {}, turn: 0, gameOver: false, winner: undefined, loser: undefined, lastAction: undefined };
+  if (!boardOk) changed = true;
+  const board = boardOk ? saved.board.map((row) => [...row]) : createBoard();
+  const battle = { players, board, hp: {}, mana: {}, shield: {}, turn: 0, gameOver: false, winner: undefined, loser: undefined, lastAction: saved.lastAction && typeof saved.lastAction === 'object' ? saved.lastAction : undefined };
+  const read = (record, id, fallback, maximum) => {
+    const value = Number(saved[record]?.[id]);
+    const normalized = Number.isFinite(value) ? Math.min(maximum, Math.max(0, value)) : fallback;
+    if (!Number.isFinite(value) || value !== normalized) changed = true;
+    return normalized;
+  };
   for (const player of players) {
-    const read = (record, fallback) => Number.isFinite(Number(saved[record]?.[player.id])) ? Number(saved[record][player.id]) : fallback;
-    battle.hp[player.id] = Math.max(0, read('hp', MONSTERS[player.monster].maxHp));
-    battle.mana[player.id] = Math.min(100, Math.max(0, read('mana', 0)));
-    battle.shield[player.id] = Math.max(0, read('shield', 0));
+    battle.hp[player.id] = read('hp', player.id, MONSTERS[player.monster].maxHp, MONSTERS[player.monster].maxHp);
+    battle.mana[player.id] = read('mana', player.id, 0, 100);
+    battle.shield[player.id] = read('shield', player.id, 0, 200);
   }
   battle.turn = Number.isInteger(saved.turn) && saved.turn >= 0 ? saved.turn : 0;
-  battle.gameOver = Boolean(saved.gameOver) && players.length > 0;
-  if (battle.gameOver && players.some((player) => player.id === saved.winner)) battle.winner = saved.winner;
-  if (battle.gameOver && players.some((player) => player.id === saved.loser)) battle.loser = saved.loser;
-  return { room: battle, changed: false };
+  if (!Number.isInteger(saved.turn) || saved.turn < 0) changed = true;
+  const winner = players.some((player) => player.id === saved.winner) ? saved.winner : undefined;
+  const loser = players.some((player) => player.id === saved.loser) && saved.loser !== winner ? saved.loser : undefined;
+  battle.gameOver = Boolean(saved.gameOver) && Boolean(winner) && Boolean(loser);
+  battle.winner = battle.gameOver ? winner : undefined;
+  battle.loser = battle.gameOver ? loser : undefined;
+  if (saved.gameOver !== battle.gameOver || saved.winner !== battle.winner || saved.loser !== battle.loser) changed = true;
+  const expectedKeys = new Set(['players', 'board', 'hp', 'mana', 'shield', 'turn', 'gameOver', 'winner', 'loser', 'lastAction']);
+  if (Object.keys(saved).some((key) => !expectedKeys.has(key))) changed = true;
+  return { room: battle, changed };
 }
 
 function addPokiPlayer(battle, id, monster, name) {
@@ -321,7 +463,9 @@ export class PokiRoom {
     this.battle = null;
     this.queue = Promise.resolve();
     this.ready = state.storage.get('poki').then((saved) => {
-      this.battle = normalizePokiRoom(saved).room;
+      const normalized = normalizePokiRoom(saved);
+      this.battle = normalized.room;
+      if (normalized.changed) return state.storage.put('poki', normalized.room);
     });
   }
 
@@ -337,7 +481,7 @@ export class PokiRoom {
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     server.accept();
-    const session = { socket: server, id: null };
+    const session = { socket: server, id: null, closed: false };
     this.sockets.set(server, session);
     server.addEventListener('message', (event) => {
       this.queue = this.queue.catch(() => {}).then(() => this.onMessage(session, event.data));
@@ -355,7 +499,7 @@ export class PokiRoom {
       players,
       maxPlayers: POKI_MAX_PLAYERS,
       phase: players >= POKI_MAX_PLAYERS ? 'game' : 'waiting',
-      canJoin: existing || players < POKI_MAX_PLAYERS,
+      canJoin: existing || players < POKI_MAX_PLAYERS || this.battle.players.some((player) => player.connected === false),
       gameOver: Boolean(this.battle.gameOver),
     };
   }
@@ -385,21 +529,32 @@ export class PokiRoom {
     if (!POKI_MONSTER_IDS.includes(monster)) return this.error(session, 'Hãy chọn một Poki thú.', true);
     const id = cleanId(message.id);
     const name = cleanName(message.name);
-    session.id = id;
+    if (session.id && session.id !== id) return this.error(session, 'Kết nối này đã gắn với người chơi khác.', true);
     const existing = this.battle.players.find((player) => player.id === id);
     if (existing) {
-      existing.monster = monster;
+      session.id = id;
+      for (const other of this.sockets.values()) if (other !== session && other.id === id) other.id = null;
+      // A reconnect may update the nickname, but cannot change creature stats
+      // after a 1v1 battle has been created.
+      if (this.battle.players.length < POKI_MAX_PLAYERS) existing.monster = monster;
       existing.name = name;
       existing.connected = true;
       await this.save();
       this.broadcastState();
       return;
     }
+    const offline = this.battle.players.find((player) => player.connected === false);
+    if (offline && this.battle.players.length < POKI_MAX_PLAYERS) {
+      this.battle.players.splice(this.battle.players.indexOf(offline), 1);
+      this.battle = freshPokiBattle(this.battle.players);
+    }
     if (this.battle.players.length >= POKI_MAX_PLAYERS) {
       const offline = this.battle.players.find((player) => player.connected === false);
       if (!offline) return this.error(session, 'Bàn đã đủ 2 người. Hãy chọn bàn khác.', true);
       this.battle.players.splice(this.battle.players.indexOf(offline), 1);
     }
+    session.id = id;
+    for (const other of this.sockets.values()) if (other !== session && other.id === id) other.id = null;
     this.battle = addPokiPlayer(this.battle, id, monster, name);
     if (this.battle.players.length === POKI_MAX_PLAYERS) this.battle = freshPokiBattle(this.battle.players);
     await this.save();
@@ -407,10 +562,17 @@ export class PokiRoom {
   }
 
   async move(session, message) {
+    if (!this.battle.players.some((player) => player.id === session.id)) return this.error(session, 'Bạn chưa vào bàn.');
     if (this.battle.players.length !== POKI_MAX_PLAYERS) return this.error(session, 'Bàn chưa đủ hai người chơi.');
-    const active = this.battle.players[this.battle.turn % POKI_MAX_PLAYERS];
-    if (active?.id !== session.id) return this.error(session, 'Chưa đến lượt bạn.');
     if (this.battle.gameOver) return this.error(session, 'Trận đấu đã kết thúc. Hãy đấu lại hoặc rời bàn.');
+    let active = this.battle.players[this.battle.turn % POKI_MAX_PLAYERS];
+    if (active?.id !== session.id) {
+      // A disconnected opponent cannot act — let the connected player take over so the table never stalls.
+      const requester = this.battle.players.find((player) => player.id === session.id);
+      if (!active || active.connected !== false || !requester) return this.error(session, 'Chưa đến lượt bạn.');
+      this.battle.turn = this.battle.players.indexOf(requester);
+      active = requester;
+    }
     const { from, to } = message;
     if (!from || !to || !Number.isInteger(from.x) || !Number.isInteger(from.y) || !Number.isInteger(to.x) || !Number.isInteger(to.y)) return this.error(session, 'Nước đi không hợp lệ.');
     const result = resolveSwap(this.battle.board, from, to);
@@ -431,10 +593,17 @@ export class PokiRoom {
   }
 
   async special(session) {
+    if (!this.battle.players.some((player) => player.id === session.id)) return this.error(session, 'Bạn chưa vào bàn.');
     if (this.battle.players.length !== POKI_MAX_PLAYERS) return this.error(session, 'Bàn chưa đủ hai người chơi.');
-    const active = this.battle.players[this.battle.turn % POKI_MAX_PLAYERS];
-    if (active?.id !== session.id) return this.error(session, 'Chưa đến lượt bạn.');
     if (this.battle.gameOver) return this.error(session, 'Trận đấu đã kết thúc. Hãy đấu lại hoặc rời bàn.');
+    let active = this.battle.players[this.battle.turn % POKI_MAX_PLAYERS];
+    if (active?.id !== session.id) {
+      // A disconnected opponent cannot act — let the connected player take over so the table never stalls.
+      const requester = this.battle.players.find((player) => player.id === session.id);
+      if (!active || active.connected !== false || !requester) return this.error(session, 'Chưa đến lượt bạn.');
+      this.battle.turn = this.battle.players.indexOf(requester);
+      active = requester;
+    }
     const player = this.battle.players.find((p) => p.id === session.id);
     const skill = applySpecial(player.monster, this.battle.mana[session.id]);
     if (!skill.valid) return this.error(session, 'Cần đủ 100 Mana để dùng kỹ năng.');
@@ -449,6 +618,7 @@ export class PokiRoom {
   }
 
   async restart(session) {
+    if (!this.battle.players.some((player) => player.id === session.id)) return this.error(session, 'Bạn chưa vào bàn.');
     if (!this.battle.gameOver) return this.error(session, 'Trận hiện tại chưa kết thúc.');
     this.battle = freshPokiBattle(this.battle.players);
     await this.save();
@@ -467,11 +637,13 @@ export class PokiRoom {
     const index = this.battle.players.findIndex((player) => player.id === id);
     if (index < 0) return;
     this.battle.players.splice(index, 1);
-    const remaining = this.battle.players.map(({ id: pid, monster, name }) => ({ id: pid, monster, name, connected: this.socketFor(pid) != null }));
+    const remaining = this.battle.players.map((player) => ({ ...player, connected: this.socketFor(player.id) != null || player.connected !== false }));
     this.battle = remaining.length ? freshPokiBattle(remaining) : initialRoom();
   }
 
   onClose(session) {
+    if (session.closed) return;
+    session.closed = true;
     this.sockets.delete(session.socket);
     if (!session.id) return;
     const player = this.battle.players.find((item) => item.id === session.id);
@@ -537,26 +709,37 @@ function freshXoGame(players) {
 
 function normalizeXoGame(saved) {
   if (!saved || typeof saved !== 'object') return { game: initialGame(), changed: false };
-  const players = Array.isArray(saved.players)
-    ? saved.players.slice(0, XO_MAX_PLAYERS).map((player = {}) => ({
-        id: String(player.id || crypto.randomUUID()).slice(0, 64),
-        name: cleanName(player.name),
-        symbol: player.symbol === 'O' ? 'O' : 'X',
-        connected: player.connected !== false,
-      }))
-    : [];
+  let changed = !Array.isArray(saved.players);
+  const usedIds = new Set();
+  const players = (Array.isArray(saved.players) ? saved.players : []).slice(0, XO_MAX_PLAYERS).map((raw = {}, index) => {
+    const player = raw && typeof raw === 'object' ? raw : {};
+    const rawId = typeof player.id === 'string' ? player.id.trim() : '';
+    let id = ID_PATTERN.test(rawId) && !usedIds.has(rawId) ? rawId : crypto.randomUUID();
+    while (usedIds.has(id)) id = crypto.randomUUID();
+    usedIds.add(id);
+    const normalized = { id, name: cleanName(player.name), symbol: index === 1 ? 'O' : 'X', connected: player.connected !== false };
+    if (id !== player.id || normalized.name !== player.name || normalized.symbol !== player.symbol || normalized.connected !== player.connected || 'accountId' in player || 'coins' in player || 'username' in player) changed = true;
+    return normalized;
+  });
+  if (Array.isArray(saved.players) && saved.players.length !== players.length) changed = true;
   const boardOk = Array.isArray(saved.board) && saved.board.length === 9 && saved.board.every((cell) => cell === null || cell === 'X' || cell === 'O');
-  const game = {
-    board: boardOk ? [...saved.board] : Array(9).fill(null),
-    players,
-    turn: Number.isInteger(saved.turn) && saved.turn >= 0 ? saved.turn : 0,
-    gameOver: Boolean(saved.gameOver) && players.length > 0,
-    winner: players.some((player) => player.id === saved.winner) ? saved.winner : null,
-    draw: Boolean(saved.draw),
-    lastMove: null,
-  };
-  if (!boardOk) game.turn = 0;
-  return { game, changed: false };
+  if (!boardOk) changed = true;
+  const board = boardOk && players.length === XO_MAX_PLAYERS ? [...saved.board] : Array(9).fill(null);
+  if (boardOk && players.length !== XO_MAX_PLAYERS && saved.board.some(Boolean)) changed = true;
+  const result = players.length === XO_MAX_PLAYERS ? xoEvaluateBoard(board, players) : { gameOver: false, winner: null, draw: false };
+  const turn = Number.isInteger(saved.turn) && saved.turn >= 0 ? saved.turn : 0;
+  if (!Number.isInteger(saved.turn) || saved.turn < 0) changed = true;
+  const rawLastMove = saved.lastMove;
+  const lastPlayer = rawLastMove && players.find((player) => player.id === rawLastMove.player);
+  const lastMove = lastPlayer && Number.isInteger(rawLastMove.cell) && rawLastMove.cell >= 0 && rawLastMove.cell < 9 && board[rawLastMove.cell] === lastPlayer.symbol
+    ? { player: lastPlayer.id, cell: rawLastMove.cell, symbol: lastPlayer.symbol }
+    : null;
+  if (JSON.stringify(rawLastMove ?? null) !== JSON.stringify(lastMove)) changed = true;
+  const game = { board, players, turn, gameOver: result.gameOver, winner: result.winner, draw: result.draw, lastMove };
+  if (saved.gameOver !== game.gameOver || saved.winner !== game.winner || saved.draw !== game.draw) changed = true;
+  const expectedKeys = new Set(['board', 'players', 'turn', 'gameOver', 'winner', 'draw', 'lastMove']);
+  if (Object.keys(saved).some((key) => !expectedKeys.has(key))) changed = true;
+  return { game, changed };
 }
 
 export class XoRoom {
@@ -568,7 +751,9 @@ export class XoRoom {
     this.game = null;
     this.queue = Promise.resolve();
     this.ready = state.storage.get('xo').then((saved) => {
-      this.game = normalizeXoGame(saved).game;
+      const normalized = normalizeXoGame(saved);
+      this.game = normalized.game;
+      if (normalized.changed) return state.storage.put('xo', normalized.game);
     });
   }
 
@@ -584,7 +769,7 @@ export class XoRoom {
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     server.accept();
-    const session = { socket: server, id: null };
+    const session = { socket: server, id: null, closed: false };
     this.sockets.set(server, session);
     server.addEventListener('message', (event) => {
       this.queue = this.queue.catch(() => {}).then(() => this.onMessage(session, event.data));
@@ -602,7 +787,7 @@ export class XoRoom {
       players,
       maxPlayers: XO_MAX_PLAYERS,
       phase: players >= XO_MAX_PLAYERS ? 'game' : 'waiting',
-      canJoin: existing || players < XO_MAX_PLAYERS,
+      canJoin: existing || players < XO_MAX_PLAYERS || this.game.players.some((player) => player.connected === false),
       gameOver: Boolean(this.game.gameOver),
     };
   }
@@ -629,27 +814,45 @@ export class XoRoom {
   async join(session, message) {
     const id = cleanId(message.id);
     const name = cleanName(message.name);
-    session.id = id;
+    if (session.id && session.id !== id) return this.error(session, 'Kết nối này đã gắn với người chơi khác.', true);
     const existing = this.game.players.find((player) => player.id === id);
     if (existing) {
+      session.id = id;
+      for (const other of this.sockets.values()) if (other !== session && other.id === id) other.id = null;
       existing.name = name;
       existing.connected = true;
       await this.save();
       this.broadcastState();
       return;
     }
+    const offline = this.game.players.find((player) => player.connected === false);
+    if (offline && this.game.players.length < XO_MAX_PLAYERS) {
+      this.game.players.splice(this.game.players.indexOf(offline), 1);
+      this.game = freshXoGame(this.game.players);
+    }
     if (this.game.players.length >= XO_MAX_PLAYERS) {
       const offline = this.game.players.find((player) => player.connected === false);
       if (!offline) return this.error(session, 'Bàn đã đủ 2 người. Hãy chọn bàn khác.', true);
       this.game.players.splice(this.game.players.indexOf(offline), 1);
     }
+    session.id = id;
+    for (const other of this.sockets.values()) if (other !== session && other.id === id) other.id = null;
     this.game = freshXoGame([...this.game.players, { id, name, connected: true }]);
     await this.save();
     this.broadcastState();
   }
 
   async move(session, message) {
+    if (!this.game.players.some((player) => player.id === session.id)) return this.error(session, 'Bạn chưa vào bàn.');
     if (this.game.players.length !== XO_MAX_PLAYERS) return this.error(session, 'Bàn chưa đủ hai người chơi.');
+    if (this.game.gameOver) return this.error(session, 'Trận đấu đã kết thúc. Hãy đấu lại hoặc rời bàn.');
+    const active = this.game.players[this.game.turn % Math.max(1, this.game.players.length)];
+    if (active?.id !== session.id) {
+      // A disconnected opponent cannot act — let the connected player take over so the table never stalls.
+      const requester = this.game.players.find((player) => player.id === session.id);
+      if (!active || active.connected !== false || !requester) return this.error(session, 'Chưa đến lượt bạn.');
+      this.game.turn = this.game.players.indexOf(requester);
+    }
     const result = xoMove(this.game, session.id, message.cell);
     if (!result.ok) return this.error(session, result.error);
     this.game = result.game;
@@ -658,6 +861,7 @@ export class XoRoom {
   }
 
   async restart(session) {
+    if (!this.game.players.some((player) => player.id === session.id)) return this.error(session, 'Bạn chưa vào bàn.');
     if (!this.game.gameOver) return this.error(session, 'Trận hiện tại chưa kết thúc.');
     this.game = freshXoGame(this.game.players);
     await this.save();
@@ -676,11 +880,13 @@ export class XoRoom {
     const index = this.game.players.findIndex((player) => player.id === id);
     if (index < 0) return;
     this.game.players.splice(index, 1);
-    const remaining = this.game.players.map(({ id: pid, name }) => ({ id: pid, name, connected: this.socketFor(pid) != null }));
+    const remaining = this.game.players.map((player) => ({ ...player, connected: this.socketFor(player.id) != null || player.connected !== false }));
     this.game = remaining.length ? freshXoGame(remaining) : initialGame();
   }
 
   onClose(session) {
+    if (session.closed) return;
+    session.closed = true;
     this.sockets.delete(session.socket);
     if (!session.id) return;
     const player = this.game.players.find((item) => item.id === session.id);
@@ -801,6 +1007,7 @@ export default {
     }
     const code = roomCode(url.pathname);
     if (code) {
+      if (!ROOM_CODES.includes(code.toUpperCase())) return json({ error: 'Không tìm thấy bàn này.' }, 404);
       if (request.headers.get('Upgrade') !== 'websocket') return json({ error: 'WebSocket required' }, 426);
       return env.ROOMS.get(env.ROOMS.idFromName(code)).fetch(request);
     }

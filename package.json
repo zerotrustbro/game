@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test test/*.test.mjs",
+    "probe": "node scripts/probe-bugs.mjs",
     "build": "npm run test && npm run build:tienlen",
     "build:tienlen": "node scripts/build.mjs",
     "dev": "wrangler dev",

@@ -155,9 +155,9 @@ server.on('upgrade', async (req, socket, head) => {
       });
       return true;
     };
-    if (await attach(/^\/api\/room\/([A-Z0-9]{4,8})$/, rooms, Room)) return;
-    if (await attach(/^\/api\/poki\/room\/([A-Z0-9-]{1,12})$/, pokiRooms, PokiRoom)) return;
-    if (await attach(/^\/api\/xo\/room\/([A-Z0-9]{4,8})$/, xoRooms, XoRoom)) return;
+    if (await attach(/^\/api\/room\/([A-Za-z0-9]{4,8})$/, rooms, Room)) return;
+    if (await attach(/^\/api\/poki\/room\/([A-Za-z0-9-]{1,12})$/, pokiRooms, PokiRoom)) return;
+    if (await attach(/^\/api\/xo\/room\/([A-Za-z0-9]{4,8})$/, xoRooms, XoRoom)) return;
     socket.destroy();
   } catch {
     socket.destroy();

@@ -87,16 +87,19 @@ function connect(code) {
   history.replaceState({}, '', xoRoomUrl(selectedTable));
   socket?.close();
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  socket = new WebSocket(`${protocol}//${location.host}/api/xo/room/${selectedTable}`);
-  socket.addEventListener('open', () => {
-    socket.send(JSON.stringify({ type: 'join', id, name: nickname() }));
+  const ws = new WebSocket(`${protocol}//${location.host}/api/xo/room/${selectedTable}`);
+  socket = ws;
+  ws.addEventListener('open', () => {
+    if (socket !== ws) return;
+    ws.send(JSON.stringify({ type: 'join', id, name: nickname() }));
   });
-  socket.addEventListener('message', (event) => {
+  ws.addEventListener('message', (event) => {
+    if (socket !== ws) return;
     let message;
     try { message = JSON.parse(event.data); } catch { return; }
     if (message.type === 'error') {
       showToast(message.message, 'error');
-      if (message.fatal) { socket?.close(); socket = null; game = null; history.replaceState({}, '', xoGamePath()); showLobby(); }
+      if (message.fatal) { ws.close(); socket = null; game = null; history.replaceState({}, '', xoGamePath()); showLobby(); }
       return;
     }
     if (message.type !== 'state') return;
@@ -106,8 +109,9 @@ function connect(code) {
     $('roomCodeLabel').textContent = message.roomCode;
     render();
   });
-  socket.addEventListener('close', () => {
-    if (game) setTimeout(() => { if (socket?.readyState === WebSocket.CLOSED) connect(selectedTable); }, 1600);
+  ws.addEventListener('close', () => {
+    if (socket !== ws) return;
+    if (game) setTimeout(() => { if (socket === ws && ws.readyState === WebSocket.CLOSED) connect(selectedTable); }, 1600);
   });
 }
 
@@ -125,19 +129,20 @@ function render() {
   const me = myPlayer();
   const foe = game.players.find((player) => player.id !== id);
   const active = game.players[game.turn % Math.max(1, game.players.length)];
-  const mine = active?.id === id;
+  // A disconnected opponent's turn belongs to the player who is still here.
+  const mine = active ? active.id === id || (active.connected === false && Boolean(me)) : false;
   $('players').innerHTML = game.players.map((player) => {
     const local = player.id === id;
     const current = active?.id === player.id && !game.gameOver;
     return `<div class="player-chip ${local ? 'local' : ''} ${current ? 'turn' : ''}"><b class="symbol ${player.symbol.toLowerCase()}">${player.symbol}</b><span>${esc(player.name)}${local ? ' (bạn)' : ''}${player.connected ? '' : ' · mất kết nối'}</span></div>`;
   }).join('') || '<div class="player-chip"><b class="symbol x">✕</b><span>Chờ đối thủ…</span></div>';
   $('battleTitle').textContent = game.gameOver
-    ? (game.draw ? 'Hòa cờ' : (game.winner === id ? 'Bạn thắng!' : `${esc(game.players.find((p) => p.id === game.winner)?.name || 'Đối thủ')} thắng`))
+    ? (game.draw ? 'Hòa cờ' : (game.winner === id ? 'Bạn thắng!' : `${game.players.find((p) => p.id === game.winner)?.name || 'Đối thủ'} thắng`))
     : game.players.length < 2 ? 'Đang chờ người chơi' : mine ? 'Đến lượt bạn' : 'Đến lượt đối thủ';
   $('board').innerHTML = game.board.map((cell, index) => `<button class="cell ${cell ? cell.toLowerCase() : ''} ${game.lastMove?.cell === index ? 'last' : ''}" data-cell="${index}" ${cell || game.gameOver || game.players.length < 2 || !mine ? 'disabled' : ''}><span>${cell === 'X' ? '✕' : cell === 'O' ? '○' : ''}</span></button>`).join('');
   $('turnLine').textContent = game.gameOver
-    ? (game.draw ? 'Bàn cờ kín — không ai thắng. Đấu lại nhé!' : `Người thắng: ${esc(game.players.find((p) => p.id === game.winner)?.name || '?')}`)
-    : game.players.length < 2 ? 'Mời thêm một người vào bàn để bắt đầu.' : mine ? 'Chọn một ô trống để đánh.' : `Đang chờ ${esc(active?.name || 'đối thủ')}…`;
+    ? (game.draw ? 'Bàn cờ kín — không ai thắng. Đấu lại nhé!' : `Người thắng: ${game.players.find((p) => p.id === game.winner)?.name || '?'}`)
+    : game.players.length < 2 ? 'Mời thêm một người vào bàn để bắt đầu.' : mine ? 'Chọn một ô trống để đánh.' : active?.connected === false ? 'Đối thủ mất kết nối — bạn có thể đi tiếp.' : `Đang chờ ${active?.name || 'đối thủ'}…`;
   $('rematchButton').classList.toggle('hidden', !game.gameOver || !me);
 }
 

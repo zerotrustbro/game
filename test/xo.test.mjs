@@ -139,6 +139,17 @@ test('xo room accepts exactly two players and rejects a third', async () => {
   assert.equal(room.game.players[1].symbol, 'O');
 });
 
+test('a stale offline waiting seat is replaced by the next player', async () => {
+  const room = await xoRoom();
+  const alice = session('player-alice', 'Alice');
+  await room.join(alice, { id: 'player-alice', name: 'Alice' });
+  room.game.players[0].connected = false;
+  assert.equal(room.summary().canJoin, true);
+  const bob = session('player-bob', 'Bob');
+  await room.join(bob, { id: 'player-bob', name: 'Bob' });
+  assert.deepEqual(room.game.players.map((player) => player.id), ['player-bob']);
+});
+
 test('xo moves require the active player and a free cell', async () => {
   const room = await xoRoom();
   const alice = session('player-alice', 'Alice');
@@ -256,4 +267,20 @@ test('the xo app shell is served from the assets binding', async () => {
     assert.equal(response.status, 200);
     assert.equal(await response.text(), 'ASSET:/xo/index.html');
   }
+});
+
+test('a socket that never joined cannot restart a finished XO match', async () => {
+  const room = await xoRoom();
+  const alice = session('player-alice', 'Alice');
+  const bob = session('player-bob', 'Bob');
+  const intruder = session('player-intruder', 'Intruder');
+  await room.join(alice, { id: 'player-alice', name: 'Alice' });
+  await room.join(bob, { id: 'player-bob', name: 'Bob' });
+  room.game.gameOver = true;
+  room.game.winner = 'player-alice';
+
+  await room.restart(intruder);
+
+  assert.equal(last(intruder).type, 'error');
+  assert.equal(room.game.gameOver, true);
 });

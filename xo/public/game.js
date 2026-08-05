@@ -18,7 +18,15 @@ export function initialGame() {
 export function addPlayer(game, player) {
   if (game.players.some((p) => p.id === player.id) || game.players.length >= 2) return game;
   const symbol = game.players.length === 0 ? 'X' : 'O';
-  return { ...game, players: [...game.players, { id: player.id, name: player.name, symbol, connected: true }] };
+  return { ...game, players: [...game.players, { id: player.id, name: player.name, symbol, connected: player.connected !== false }] };
+}
+
+export function evaluateBoard(board, players) {
+  const line = WIN_LINES.find((candidate) => candidate.every((index) => board[index] && board[index] === board[candidate[0]]));
+  const symbol = line && board[line[0]];
+  const winner = symbol ? players.find((player) => player.symbol === symbol)?.id || null : null;
+  const draw = !winner && board.every(Boolean);
+  return { gameOver: Boolean(winner || draw), winner, draw };
 }
 
 export function makeMove(game, playerId, cell) {
@@ -31,17 +39,16 @@ export function makeMove(game, playerId, cell) {
   const symbol = player.symbol;
   const board = [...game.board];
   board[index] = symbol;
-  const win = WIN_LINES.some((line) => line.every((i) => board[i] === symbol));
-  const draw = !win && board.every(Boolean);
+  const result = evaluateBoard(board, game.players);
   return {
     ok: true,
     game: {
       ...game,
       board,
       turn: game.turn + 1,
-      gameOver: Boolean(win || draw),
-      winner: win ? playerId : null,
-      draw,
+      gameOver: result.gameOver,
+      winner: result.winner,
+      draw: result.draw,
       lastMove: { player: playerId, cell: index, symbol },
     },
   };
@@ -50,7 +57,7 @@ export function makeMove(game, playerId, cell) {
 export function restartGame(game) {
   return {
     board: emptyBoard(),
-    players: game.players.map((player) => ({ ...player, connected: true })),
+    players: game.players.map((player) => ({ ...player, connected: player.connected !== false })),
     turn: 0,
     gameOver: false,
     winner: null,

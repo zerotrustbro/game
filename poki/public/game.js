@@ -9,8 +9,12 @@ export const TURN_MANA_CAP = 35;
 const gems = ['sword', 'heart', 'mana'];
 const clone = (b) => b.map((r) => [...r]);
 const key = (x, y) => `${x},${y}`;
-const pickIndex = (length, random) => Math.min(length - 1, Math.max(0, Math.floor(random() * length)));
-const adjacent = (a, b) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y) === 1;
+const pickIndex = (length, random) => {
+  const value = Number(random());
+  const safe = Number.isFinite(value) ? value : 0;
+  return Math.min(length - 1, Math.max(0, Math.floor(safe * length)));
+};
+const adjacent = (a, b) => Boolean(a && b) && Math.abs(a.x - b.x) + Math.abs(a.y - b.y) === 1;
 const pick = (random) => gems[pickIndex(gems.length, random)];
 
 function groups(board) {
@@ -40,6 +44,26 @@ function matched(board) {
   return groups(board).reduce((a, g) => { g.cells.forEach((c) => a.add(c)); return a; }, new Set());
 }
 
+function hasLineThrough(board, x, y, dx, dy) {
+  const gem = board[y]?.[x];
+  if (!gems.includes(gem)) return false;
+  let count = 1;
+  for (const direction of [-1, 1]) {
+    let nextX = x + dx * direction;
+    let nextY = y + dy * direction;
+    while (board[nextY]?.[nextX] === gem) {
+      count += 1;
+      nextX += dx * direction;
+      nextY += dy * direction;
+    }
+  }
+  return count >= 3;
+}
+
+function createsMatchAt(board, point) {
+  return hasLineThrough(board, point.x, point.y, 1, 0) || hasLineThrough(board, point.x, point.y, 0, 1);
+}
+
 function generate(random) {
   const b = Array.from({ length: SIZE }, () => []);
   for (let y = 0; y < SIZE; y++) {
@@ -53,14 +77,19 @@ function generate(random) {
 
 export function validMoves(input) {
   const out = [];
+  const board = clone(input);
+  // Settled boards can only gain a new line through one of the swapped cells.
+  // Keep the full scan for malformed/legacy boards that already contain a match.
+  const hasExistingMatch = matched(input).size > 0;
   for (let y = 0; y < SIZE; y++) {
     for (let x = 0; x < SIZE; x++) {
       for (const [dx, dy] of [[1, 0], [0, 1]]) {
         const to = { x: x + dx, y: y + dy };
         if (to.x >= SIZE || to.y >= SIZE) continue;
-        const b = clone(input);
-        [b[y][x], b[to.y][to.x]] = [b[to.y][to.x], b[y][x]];
-        if (matched(b).size) out.push({ from: { x, y }, to });
+        [board[y][x], board[to.y][to.x]] = [board[to.y][to.x], board[y][x]];
+        const scores = hasExistingMatch ? matched(board).size > 0 : createsMatchAt(board, { x, y }) || createsMatchAt(board, to);
+        [board[y][x], board[to.y][to.x]] = [board[to.y][to.x], board[y][x]];
+        if (scores) out.push({ from: { x, y }, to });
       }
     }
   }
@@ -135,7 +164,8 @@ export const MONSTERS = {
 export const GEM_LABEL = { sword: '⚔', heart: '♥', mana: '✦' };
 
 export function applySpecial(monster, mana) {
-  const s = MONSTERS[monster].skill;
+  const s = MONSTERS[monster]?.skill;
+  if (!s) return { valid: false, damage: 0, healing: 0, manaDrain: 0, selfDamage: 0, shield: 0, manaAfter: mana, name: 'Kỹ năng không xác định' };
   return mana < 100
     ? { valid: false, damage: 0, healing: 0, manaDrain: 0, selfDamage: 0, shield: 0, manaAfter: mana, name: s.name }
     : { valid: true, ...s, manaAfter: 0 };
@@ -174,7 +204,7 @@ export function applyBattleDamage(state, target, damage) {
 export function applySpecialTurn(state, attacker, mana, skill) {
   const player = state.players.find((p) => p.id === attacker);
   const target = state.players.find((p) => p.id !== attacker)?.id;
-  const expected = player && MONSTERS[player.monster].skill;
+  const expected = player ? MONSTERS[player.monster]?.skill : undefined;
   if (!player || !target || state.gameOver || mana < 100 || (state.mana[attacker] ?? 0) < 100 || !skill.valid || !expected || Object.keys(expected).some((k) => skill[k] !== expected[k])) {
     return { state, gameOver: Boolean(state.gameOver), winner: state.winner, loser: state.loser };
   }

@@ -24,8 +24,21 @@ test('creates an 8x8 board containing only sword, heart, and mana gems', () => {
   assert.ok(validMoves(board).length > 0);
 });
 
+test('does not mutate a settled board while searching legal swaps', () => {
+  const board = createBoard();
+  const before = structuredClone(board);
+  validMoves(board);
+  assert.deepEqual(board, before);
+});
+
 test('keeps board generation valid when the random source returns its upper boundary', () => {
   const board = createBoard(() => 1);
+  assert.ok(board.flat().every((gem) => GEMS.includes(gem)));
+  assert.ok(validMoves(board).length > 0);
+});
+
+test('keeps board generation valid when the random source is non-finite', () => {
+  const board = createBoard(() => Number.NaN);
   assert.ok(board.flat().every((gem) => GEMS.includes(gem)));
   assert.ok(validMoves(board).length > 0);
 });
@@ -116,6 +129,7 @@ test('offers six original creatures with distinct special skills', () => {
 
 test('requires 100 Mana and gives every creature a distinct special result', () => {
   assert.equal(applySpecial('emberfox', 99).valid, false);
+  assert.equal(applySpecial('unknown-monster', 100).valid, false);
   const skills = Object.keys(MONSTERS).map((id) => applySpecial(id, 100));
   assert.ok(skills.every((skill) => skill.valid && skill.manaAfter === 0));
   assert.equal(new Set(skills.map((skill) => JSON.stringify(skill))).size, 6);
