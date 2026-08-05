@@ -162,6 +162,12 @@ function handleMessage(message) {
   if (message.type !== 'state') return;
   if (message.you) {
     state.playerId = message.you;
+    // Persist the server's canonical id so reconnects and room-list queries
+    // use the same identity instead of a legacy id that gets remapped again.
+    if (state.id !== message.you) {
+      state.id = message.you;
+      localStorage.setItem('player-id', state.id);
+    }
   }
   state.room = message;
   state.selected.clear();

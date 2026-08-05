@@ -348,3 +348,22 @@ test('a hydrated xo game marks seats offline so newcomers can reclaim them', asy
   assert.ok(room.game.players.some((player) => player.id === 'player-carol'));
   assert.equal(last(carol).type, 'state');
 });
+
+test('an xo rematch refuses to reuse a disconnected seat', async () => {
+  const room = await xoRoom();
+  const alice = session('player-alice', 'Alice');
+  const bob = session('player-bob', 'Bob');
+  await room.join(alice, { id: 'player-alice', name: 'Alice' });
+  await room.join(bob, { id: 'player-bob', name: 'Bob' });
+  room.game.gameOver = true;
+  room.game.winner = 'player-alice';
+  room.game.players.find((player) => player.id === 'player-bob').connected = false;
+
+  await room.restart(alice);
+
+  assert.equal(last(alice).type, 'error');
+  assert.match(last(alice).message, /2 người/);
+  assert.equal(room.game.gameOver, true);
+  // the ghost seat is kept so its owner can still reconnect
+  assert.ok(room.game.players.some((player) => player.id === 'player-bob'));
+});

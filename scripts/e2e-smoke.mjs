@@ -48,9 +48,9 @@ const waitFor = async (received, predicate, label, timeoutMs = 4000) => {
   const afterMove = await waitFor(bob.received, (m) => m.type === 'state' && m.battle.lastAction?.player === aliceJoined.you, 'bob sees alice move');
   console.log('poki move ok — turn', afterMove.battle.turn, '| damage:', afterMove.battle.lastAction.damage);
 
-  bob.ws.send(JSON.stringify({ type: 'move', from: { x: 0, y: 0 }, to: { x: 1, y: 0 } }));
-  await waitFor(bob.received, (m) => m.type === 'error', 'out-of-turn rejected');
-  console.log('out-of-turn rejected: OK');
+  bob.ws.send(JSON.stringify({ type: 'move', from: { x: 0, y: 0 }, to: { x: 5, y: 5 } }));
+  await waitFor(bob.received, (m) => m.type === 'error', 'invalid move rejected');
+  console.log('invalid move rejected: OK');
 
   alice.ws.send(JSON.stringify({ type: 'leave' }));
   await waitFor(bob.received, (m) => m.type === 'state' && m.battle.players.length === 1, 'alice left');

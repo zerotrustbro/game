@@ -11,6 +11,9 @@ const XO_MAX_PLAYERS = 2;
 const POKI_MONSTER_IDS = Object.freeze(Object.keys(MONSTERS));
 const POKI_GEMS = new Set(['sword', 'heart', 'mana']);
 const ID_PATTERN = /^[A-Za-z0-9-]{8,64}$/;
+// Upper bound for a single WebSocket frame: room messages are tiny JSON
+// (cards, cells, moves), so anything bigger is hostile or broken.
+const MAX_MESSAGE_SIZE = 64 * 1024;
 
 function json(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), {
@@ -157,7 +160,8 @@ export class Room {
         // host role) can be reclaimed, and reopen a mid-game table as a lobby.
         for (const player of this.room.players) if (player.connected) { player.connected = false; changed = true; }
         if (this.room.phase === 'game') { this.room.phase = 'lobby'; this.room.game = null; this.room.roundId = null; changed = true; }
-        if (this.room.hostId) { this.room.hostId = null; changed = true; }
+        // Keep the host role when the host's seat survived; free it otherwise.
+        if (this.room.hostId && !this.room.players.some((player) => player.id === this.room.hostId)) { this.room.hostId = null; changed = true; }
       }
       if (changed) await state.storage.put('room', this.room);
     });
@@ -177,6 +181,7 @@ export class Room {
     const session = { socket: server, playerId: null, closed: false };
     this.sockets.set(server, session);
     server.addEventListener('message', (event) => {
+      if (typeof event.data !== 'string' || event.data.length > MAX_MESSAGE_SIZE) { this.error(session, 'Yêu cầu quá lớn.', true); return; }
       this.queue = this.queue.catch(() => {}).then(() => this.onMessage(session, event.data));
     });
     server.addEventListener('close', () => this.onClose(session));
@@ -212,13 +217,18 @@ export class Room {
     const id = cleanId(message.id);
     if (session.playerId && session.playerId !== id) return this.error(session, 'Kết nối này đã gắn với người chơi khác.', true);
     const existing = this.room.players.find((player) => player.id === id);
+    if (this.room.phase === 'game' && !existing) return this.error(session, 'Ván đã bắt đầu, hãy vào ván kế tiếp.', true);
     if (!existing && this.room.players.length >= MAX_PLAYERS) {
       const offline = this.room.players.find((player) => player.connected === false);
       if (!offline) return this.error(session, 'Phòng đã đủ 4 người.', true);
       this.room.players.splice(this.room.players.indexOf(offline), 1);
+      if (this.room.hostId === offline.id) this.room.hostId = null;
     }
-    if (this.room.phase === 'game' && !existing) return this.error(session, 'Ván đã bắt đầu, hãy vào ván kế tiếp.', true);
     const playerId = existing?.id || id;
+    // A host whose seat is gone or offline loses the role to the next joiner,
+    // so a ghost host can never block a live table.
+    const hostSeat = this.room.players.find((player) => player.id === this.room.hostId);
+    if (this.room.hostId && (!hostSeat || hostSeat.connected === false)) this.room.hostId = null;
     if (existing) {
       existing.name = cleanName(message.name);
       existing.avatar = cleanAvatar(message.avatar || existing.avatar);
@@ -247,15 +257,14 @@ export class Room {
 
   async play(session, cards) {
     if (!this.isKnown(session) || this.room.phase !== 'game') return this.error(session, 'Chưa có ván đang chơi.');
-    const advanced = this.advancePastOffline();
-    const result = playMove(this.room.game, session.playerId, cards);
-    if (!result.ok) {
-      if (advanced) {
-        await this.save();
-        this.broadcastState();
-      }
-      return this.error(session, result.error);
+    let result = playMove(this.room.game, session.playerId, cards);
+    if (!result.ok && this.advancePastOffline()) {
+      // The turn holder disconnected mid-game: skip their turn, then validate
+      // the request against the advanced table. The skip is only committed
+      // together with a valid move, so a bad request never moves the game.
+      result = playMove(this.room.game, session.playerId, cards);
     }
+    if (!result.ok) return this.error(session, result.error);
     this.room.game = result.game;
     await this.save();
     this.broadcastState(result.action);
@@ -263,15 +272,11 @@ export class Room {
 
   async pass(session) {
     if (!this.isKnown(session) || this.room.phase !== 'game') return this.error(session, 'Chưa có ván đang chơi.');
-    const advanced = this.advancePastOffline();
-    const result = passMove(this.room.game, session.playerId);
-    if (!result.ok) {
-      if (advanced) {
-        await this.save();
-        this.broadcastState();
-      }
-      return this.error(session, result.error);
+    let result = passMove(this.room.game, session.playerId);
+    if (!result.ok && this.advancePastOffline()) {
+      result = passMove(this.room.game, session.playerId);
     }
+    if (!result.ok) return this.error(session, result.error);
     this.room.game = result.game;
     await this.save();
     this.broadcastState(result.action);
@@ -280,6 +285,12 @@ export class Room {
   async restart(session) {
     if (!this.isKnown(session) || this.room.hostId !== session.playerId) return this.error(session, 'Chỉ chủ phòng mới có thể chơi ván mới.');
     if (!this.room.game?.gameOver) return this.error(session, 'Ván hiện tại chưa kết thúc.');
+    // A rematch never includes seats whose owners disconnected mid-match.
+    if (this.room.players.some((player) => !player.connected)) {
+      this.room.players = this.room.players.filter((player) => player.connected);
+      if (!this.room.players.some((player) => player.id === this.room.hostId)) this.room.hostId = this.room.players[0]?.id || null;
+    }
+    if (this.room.players.length < 2) return this.error(session, 'Cần ít nhất 2 người đang kết nối để chơi ván mới.');
     await this.beginRound();
   }
 
@@ -518,6 +529,7 @@ export class PokiRoom {
     const session = { socket: server, id: null, closed: false };
     this.sockets.set(server, session);
     server.addEventListener('message', (event) => {
+      if (typeof event.data !== 'string' || event.data.length > MAX_MESSAGE_SIZE) { this.error(session, 'Yêu cầu quá lớn.', true); return; }
       this.queue = this.queue.catch(() => {}).then(() => this.onMessage(session, event.data));
     });
     server.addEventListener('close', () => this.onClose(session));
@@ -656,7 +668,10 @@ export class PokiRoom {
   async restart(session) {
     if (!this.battle.players.some((player) => player.id === session.id)) return this.error(session, 'Bạn chưa vào bàn.');
     if (!this.battle.gameOver) return this.error(session, 'Trận hiện tại chưa kết thúc.');
-    this.battle = freshPokiBattle(this.battle.players);
+    // A rematch never includes seats whose owners disconnected mid-match.
+    const connected = this.battle.players.filter((player) => player.connected);
+    if (connected.length < POKI_MAX_PLAYERS) return this.error(session, 'Cần 2 người đang kết nối để chơi trận mới.');
+    this.battle = freshPokiBattle(connected);
     await this.save();
     this.broadcastState();
   }
@@ -815,6 +830,7 @@ export class XoRoom {
     const session = { socket: server, id: null, closed: false };
     this.sockets.set(server, session);
     server.addEventListener('message', (event) => {
+      if (typeof event.data !== 'string' || event.data.length > MAX_MESSAGE_SIZE) { this.error(session, 'Yêu cầu quá lớn.', true); return; }
       this.queue = this.queue.catch(() => {}).then(() => this.onMessage(session, event.data));
     });
     server.addEventListener('close', () => this.onClose(session));
@@ -907,7 +923,10 @@ export class XoRoom {
   async restart(session) {
     if (!this.game.players.some((player) => player.id === session.id)) return this.error(session, 'Bạn chưa vào bàn.');
     if (!this.game.gameOver) return this.error(session, 'Trận hiện tại chưa kết thúc.');
-    this.game = freshXoGame(this.game.players);
+    // A rematch never includes seats whose owners disconnected mid-match.
+    const connected = this.game.players.filter((player) => player.connected);
+    if (connected.length < XO_MAX_PLAYERS) return this.error(session, 'Cần 2 người đang kết nối để chơi trận mới.');
+    this.game = freshXoGame(connected);
     await this.save();
     this.broadcastState();
   }

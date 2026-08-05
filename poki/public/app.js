@@ -21,7 +21,7 @@ let displayedBoard;
 let boardAnimationToken = 0;
 let effectToken = 0;
 
-const id = localStorage.getItem('player-id') || crypto.randomUUID();
+let id = localStorage.getItem('player-id') || crypto.randomUUID();
 localStorage.setItem('player-id', id);
 const monsterIds = Object.keys(MONSTERS);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -166,6 +166,12 @@ function connect(code, monster) {
     }
     if (message.type !== 'state') return;
     conn.id = message.you;
+    // Persist the server's canonical id so reconnects and room-list queries
+    // use the same identity instead of a legacy id that gets remapped again.
+    if (id !== message.you) {
+      id = message.you;
+      localStorage.setItem('player-id', id);
+    }
     state = message.battle;
     notice = '';
     if (!receivedRoomState) { receivedRoomState = true; render(); return; }

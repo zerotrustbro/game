@@ -68,10 +68,11 @@ test('hydrated ghost game rooms reopen as joinable lobbies', async () => {
     roundId: 'ROUND1',
   });
   // After a DO eviction/restart no WebSocket survives: seats become ghosts,
-  // the host role is freed and a mid-game table is reopened as a lobby.
+  // a mid-game table is reopened as a lobby, and the host role stays with
+  // the surviving host seat until a live player joins.
   assert.equal(room.room.phase, 'lobby');
   assert.equal(room.room.game, null);
-  assert.equal(room.room.hostId, null);
+  assert.equal(room.room.hostId, 'host-player');
   assert.ok(room.room.players.every((player) => player.connected === false));
   const summaryResponse = await room.fetch(new Request('https://room/summary?code=BAN01', { headers: { 'x-internal-room': '1' } }));
   assert.equal(summaryResponse.status, 200);
@@ -84,6 +85,7 @@ test('hydrated ghost game rooms reopen as joinable lobbies', async () => {
   await room.join(newcomer, { id: 'new-player', name: 'New', avatar: 1 });
   assert.equal(room.room.players.length, 3);
   assert.ok(room.room.players.some((player) => player.id === 'new-player'));
+  // the offline host seat yields the host role to the first live joiner
   assert.equal(room.room.hostId, 'new-player');
 });
 
@@ -229,8 +231,8 @@ test('legacy saved rooms drop account fields during normalization', async () => 
   assert.equal(room.room.players[0].name, 'Host');
   assert.equal(room.getPersisted().players[0].name, 'Host');
   assert.ok(!('settlement' in room.getPersisted()));
-  // rehydration frees the host role: the first live player to join hosts
-  assert.equal(room.room.hostId, null);
+  // rehydration keeps the host role on the surviving host seat
+  assert.equal(room.room.hostId, legacyId);
 });
 
 test('legacy game rooms drop account fields and stale matches during rehydration', async () => {
@@ -330,4 +332,58 @@ test('api endpoints reject non-GET methods and unknown api paths return json 404
   assert.equal(unknown.status, 404);
   assert.match(unknown.headers.get('content-type'), /json/);
   assert.equal((await unknown.json()).error, 'Không tìm thấy API này.');
+});
+
+test('invalid plays never move or persist the turn', async () => {
+  const room = await createRoom();
+  const host = session('host-player');
+  const guest = session('guest-player');
+  room.sockets.set(host.socket, host);
+  room.sockets.set(guest.socket, guest);
+  await room.join(host, { id: 'host-player', name: 'Host', avatar: 1 });
+  await room.join(guest, { id: 'guest-player', name: 'Guest', avatar: 1 });
+  await room.start(host);
+  room.room.game.mustStart = false;
+  const persistedTurn = room.getPersisted().game.turnIndex;
+
+  // invalid action while everyone is connected
+  await room.play(host, ['not-a-card']);
+  assert.equal(host.socket.messages.at(-1).type, 'error');
+  assert.equal(room.room.game.turnIndex, persistedTurn);
+  assert.equal(room.getPersisted().game.turnIndex, persistedTurn);
+
+  // invalid action while the turn holder is offline: the ghost is skipped
+  // (legitimate progress), but the rejection is never persisted
+  room.room.game.turnIndex = 1;
+  room.room.players.find((player) => player.id === 'guest-player').connected = false;
+  await room.play(host, ['not-a-card']);
+  assert.equal(host.socket.messages.at(-1).type, 'error');
+  assert.equal(room.room.game.turnIndex, 0); // auto-skip reached the requester
+  assert.equal(room.getPersisted().game.turnIndex, persistedTurn);
+
+  // the same holds for an invalid pass
+  room.room.game.turnIndex = 1;
+  await room.pass(host);
+  assert.equal(host.socket.messages.at(-1).type, 'error');
+  assert.equal(room.getPersisted().game.turnIndex, persistedTurn);
+});
+
+test('a rematch never includes seats whose owners disconnected mid-match', async () => {
+  const room = await createRoom();
+  const host = session('host-player');
+  const guest = session('guest-player');
+  room.sockets.set(host.socket, host);
+  room.sockets.set(guest.socket, guest);
+  await room.join(host, { id: 'host-player', name: 'Host', avatar: 1 });
+  await room.join(guest, { id: 'guest-player', name: 'Guest', avatar: 1 });
+  await room.start(host);
+  room.room.game.gameOver = true;
+  room.room.game.winner = 'host-player';
+  room.room.players.find((player) => player.id === 'guest-player').connected = false;
+
+  await room.restart(host);
+
+  assert.equal(host.socket.messages.at(-1).type, 'error');
+  assert.match(host.socket.messages.at(-1).message, /2 người/);
+  assert.deepEqual(room.room.players.map((player) => player.id), ['host-player']);
 });

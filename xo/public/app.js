@@ -8,7 +8,7 @@ const toast = $('toast');
 const playerName = $('playerName');
 const topNick = $('nickname');
 
-const id = localStorage.getItem('player-id') || crypto.randomUUID();
+let id = localStorage.getItem('player-id') || crypto.randomUUID();
 localStorage.setItem('player-id', id);
 
 let socket = null;
@@ -110,6 +110,12 @@ function connect(code) {
     }
     if (message.type !== 'state') return;
     you = message.you || you;
+    // Persist the server's canonical id so reconnects and room-list queries
+    // use the same identity instead of a legacy id that gets remapped again.
+    if (id !== you) {
+      id = you;
+      localStorage.setItem('player-id', id);
+    }
     game = message.game;
     lobbyView.classList.add('hidden');
     battleView.classList.remove('hidden');
