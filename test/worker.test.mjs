@@ -55,28 +55,85 @@ test('public worker lists five room summaries', async () => {
   assert.ok(seen.every((request) => request.internal === '1'));
 });
 
-test('started room summaries reject newcomers while allowing existing players to reconnect', async () => {
+test('hydrated ghost game rooms reopen as joinable lobbies', async () => {
   const room = await createRoom({}, {
     phase: 'game',
     hostId: 'host-player',
-    players: [{ id: 'host-player', name: 'Host', avatar: 1, connected: false }],
-    game: null,
+    players: [
+      { id: 'host-player', name: 'Host', avatar: 1, connected: true },
+      { id: 'guest-player', name: 'Guest', avatar: 2, connected: true },
+    ],
+    game: { players: [{ id: 'host-player', hand: [] }, { id: 'guest-player', hand: ['3s'] }], turnIndex: 0, currentPlay: null, passCount: 0, mustStart: true, gameOver: false, winner: null },
     roomCode: 'BAN01',
     roundId: 'ROUND1',
   });
+  // After a DO eviction/restart no WebSocket survives: seats become ghosts,
+  // the host role is freed and a mid-game table is reopened as a lobby.
+  assert.equal(room.room.phase, 'lobby');
+  assert.equal(room.room.game, null);
+  assert.equal(room.room.hostId, null);
+  assert.ok(room.room.players.every((player) => player.connected === false));
   const summaryResponse = await room.fetch(new Request('https://room/summary?code=BAN01', { headers: { 'x-internal-room': '1' } }));
   assert.equal(summaryResponse.status, 200);
   assert.deepEqual(await summaryResponse.json(), {
-    code: 'BAN01', players: 1, maxPlayers: 4, phase: 'game', canJoin: false,
+    code: 'BAN01', players: 2, maxPlayers: 4, phase: 'lobby', canJoin: true,
   });
-  const existingSummary = await room.fetch(new Request('https://room/summary?code=BAN01&pid=host-player', { headers: { 'x-internal-room': '1' } }));
-  assert.equal((await existingSummary.json()).canJoin, true);
 
   const newcomer = session('new-player');
   room.sockets.set(newcomer.socket, newcomer);
   await room.join(newcomer, { id: 'new-player', name: 'New', avatar: 1 });
-  assert.equal(room.room.players.length, 1);
+  assert.equal(room.room.players.length, 3);
+  assert.ok(room.room.players.some((player) => player.id === 'new-player'));
+  assert.equal(room.room.hostId, 'new-player');
+});
+
+test('a live game room rejects newcomers while existing players reconnect', async () => {
+  const room = await createRoom();
+  const host = session('host-player');
+  const guest = session('guest-player');
+  room.sockets.set(host.socket, host);
+  room.sockets.set(guest.socket, guest);
+  await room.join(host, { id: 'host-player', name: 'Host', avatar: 1 });
+  await room.join(guest, { id: 'guest-player', name: 'Guest', avatar: 1 });
+  await room.start(host);
+  assert.equal(room.room.phase, 'game');
+
+  const newcomer = session('new-player');
+  room.sockets.set(newcomer.socket, newcomer);
+  await room.join(newcomer, { id: 'new-player', name: 'New', avatar: 1 });
+  assert.equal(room.room.players.length, 2);
   assert.match(newcomer.socket.messages.at(-1).message, /đã bắt đầu/);
+  assert.equal(newcomer.socket.messages.at(-1).fatal, true);
+
+  const summary = await room.fetch(new Request('https://room/summary?code=BAN01&pid=new-player', { headers: { 'x-internal-room': '1' } }));
+  assert.equal((await summary.json()).canJoin, false);
+  const existingSummary = await room.fetch(new Request('https://room/summary?code=BAN01&pid=host-player', { headers: { 'x-internal-room': '1' } }));
+  assert.equal((await existingSummary.json()).canJoin, true);
+});
+
+test('a full lobby of ghost seats is reclaimable by a newcomer', async () => {
+  const room = await createRoom({}, {
+    phase: 'lobby',
+    hostId: 'player-1',
+    players: [
+      { id: 'player-1', name: 'P1', avatar: 1, connected: true },
+      { id: 'player-2', name: 'P2', avatar: 2, connected: true },
+      { id: 'player-3', name: 'P3', avatar: 3, connected: true },
+      { id: 'player-4', name: 'P4', avatar: 4, connected: true },
+    ],
+    game: null,
+    roomCode: 'BAN01',
+    roundId: null,
+  });
+  assert.equal(room.summary('stranger').canJoin, true);
+
+  const newcomer = session('new-player');
+  room.sockets.set(newcomer.socket, newcomer);
+  await room.join(newcomer, { id: 'new-player', name: 'New', avatar: 1 });
+  assert.equal(room.room.players.length, 4);
+  assert.ok(room.room.players.some((player) => player.id === 'new-player'));
+  assert.equal(room.room.hostId, 'new-player');
+  assert.equal(newcomer.socket.messages.at(-1).type, 'state');
 });
 
 test('players join a lobby table by nickname and avatar', async () => {
@@ -172,10 +229,11 @@ test('legacy saved rooms drop account fields during normalization', async () => 
   assert.equal(room.room.players[0].name, 'Host');
   assert.equal(room.getPersisted().players[0].name, 'Host');
   assert.ok(!('settlement' in room.getPersisted()));
-  assert.equal(room.room.hostId, legacyId);
+  // rehydration frees the host role: the first live player to join hosts
+  assert.equal(room.room.hostId, null);
 });
 
-test('legacy game players drop account fields during normalization', async () => {
+test('legacy game rooms drop account fields and stale matches during rehydration', async () => {
   const room = await createRoom({}, {
     phase: 'game',
     hostId: 'host-player',
@@ -193,9 +251,14 @@ test('legacy game players drop account fields during normalization', async () =>
     },
     roomCode: 'BAN01', roundId: 'ROUND1',
   });
-  assert.ok(room.room.game.players.every((player) => Object.keys(player).sort().join(',') === 'avatar,hand,id,name'));
-  assert.ok(!('accountId' in room.getPersisted().game) && !('coins' in room.getPersisted().game));
-  assert.ok(room.getPersisted().game.players.every((player) => !('accountId' in player) && !('xu' in player) && !('coins' in player)));
+  // the stale match cannot resume without its players, so it is discarded
+  assert.equal(room.room.phase, 'lobby');
+  assert.equal(room.room.game, null);
+  assert.equal(room.room.roundId, null);
+  assert.ok(room.room.players.every((player) => player.connected === false));
+  const persisted = room.getPersisted();
+  assert.ok(persisted.players.every((player) => !('accountId' in player) && !('xu' in player) && !('coins' in player)));
+  assert.ok(!('settlement' in persisted) && !('accountId' in persisted) && !('coins' in persisted));
 });
 
 test('disconnecting from the lobby frees the seat and reassigns the host', async () => {
@@ -249,4 +312,22 @@ test('an explicit leave removes a player and closes only that socket', async () 
   assert.deepEqual(room.room.players.map((player) => player.id), ['guest-player']);
   assert.equal(room.sockets.has(host.socket), false);
   assert.equal(room.sockets.has(guest.socket), true);
+});
+
+test('api endpoints reject non-GET methods and unknown api paths return json 404', async () => {
+  const env = {
+    ROOMS: { idFromName: () => ({ get: () => ({ fetch: async () => new Response('{}', { status: 200 }) }) }) },
+    POKI_ROOMS: { idFromName: () => ({ get: () => ({ fetch: async () => new Response('{}', { status: 200 }) }) }) },
+    XO_ROOMS: { idFromName: () => ({ get: () => ({ fetch: async () => new Response('{}', { status: 200 }) }) }) },
+  };
+  for (const path of ['/api/rooms', '/api/poki/rooms', '/api/xo/rooms', '/api/health']) {
+    const response = await worker.fetch(new Request(`https://game.test${path}`, { method: 'POST' }), env);
+    assert.equal(response.status, 405);
+    assert.match(response.headers.get('content-type'), /json/);
+    assert.equal((await response.json()).error, 'Method not allowed');
+  }
+  const unknown = await worker.fetch(new Request('https://game.test/api/rooms/BAN99/secret'), env);
+  assert.equal(unknown.status, 404);
+  assert.match(unknown.headers.get('content-type'), /json/);
+  assert.equal((await unknown.json()).error, 'Không tìm thấy API này.');
 });

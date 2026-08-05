@@ -7,6 +7,7 @@ import {
   describeCombo,
   passMove,
   playMove,
+  skipLead,
 } from '../tienlen/public/engine.js';
 
 const gameWith = (hands, options = {}) => createGame(
@@ -28,6 +29,23 @@ test('first play must include three of spades', () => {
   const result = playMove(game, 'a', ['4s']);
   assert.equal(result.ok, false);
   assert.match(result.error, /3 bích/);
+});
+
+test('skipping an opening lead lifts the three-of-spades requirement', () => {
+  const game = gameWith([['3s', '5s'], ['4s', '6s']], { mustStart: true, turnIndex: 0 });
+  const after = skipLead(game);
+  assert.equal(after.mustStart, false);
+  assert.equal(after.turnIndex, 1);
+  // the next player may now open the trick with any combination
+  const result = playMove(after, 'b', ['4s']);
+  assert.equal(result.ok, true);
+});
+
+test('skipLead still advances a normal trick without touching mustStart', () => {
+  const game = gameWith([['3s'], ['4s'], ['5s']], { mustStart: false, turnIndex: 2 });
+  const after = skipLead(game);
+  assert.equal(after.turnIndex, 0);
+  assert.equal(after.mustStart, false);
 });
 
 test('deals exactly thirteen cards to each player', () => {

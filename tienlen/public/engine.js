@@ -188,6 +188,9 @@ export function passMove(game, playerId) {
 export function skipLead(game) {
   const next = structuredClone(game);
   next.turnIndex = nextPlayerIndex(next, next.turnIndex);
+  // An untouched opening lead was skipped because its owner is offline:
+  // the 3♠ requirement dies with them, so the next player can open freely.
+  if (game.mustStart) next.mustStart = false;
   return next;
 }
 

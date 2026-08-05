@@ -284,3 +284,67 @@ test('a socket that never joined cannot restart a finished XO match', async () =
   assert.equal(last(intruder).type, 'error');
   assert.equal(room.game.gameOver, true);
 });
+
+test('makeMove rejects malformed cell values instead of coercing them', () => {
+  const game = addPlayer(addPlayer(initialGame(), { id: 'a' }), { id: 'b' });
+  for (const cell of [null, undefined, false, true, '', '  ', '0', [], {}]) {
+    const result = makeMove(game, 'a', cell);
+    assert.equal(result.ok, false, `cell ${JSON.stringify(cell)} must be rejected`);
+    assert.match(result.error, /Ô không hợp lệ/);
+  }
+  for (const cell of [-1, 9, 3.5, NaN]) {
+    assert.equal(makeMove(game, 'a', cell).ok, false, `cell ${cell} must be rejected`);
+  }
+  assert.equal(makeMove(game, 'a', 0).ok, true);
+});
+
+test('a malformed xo cell from a client is rejected and keeps the board', async () => {
+  const room = await xoRoom();
+  const alice = session('player-alice', 'Alice');
+  const bob = session('player-bob', 'Bob');
+  await room.join(alice, { id: 'player-alice', name: 'Alice' });
+  await room.join(bob, { id: 'player-bob', name: 'Bob' });
+
+  await room.move(alice, { cell: null });
+
+  assert.equal(last(alice).type, 'error');
+  assert.match(last(alice).message, /Ô không hợp lệ/);
+  assert.ok(room.game.board.every((cell) => cell === null));
+  assert.equal(room.game.turn, 0);
+});
+
+test('an invalid xo move during offline takeover does not advance the turn', async () => {
+  const room = await xoRoom();
+  const alice = session('player-alice', 'Alice');
+  const bob = session('player-bob', 'Bob');
+  await room.join(alice, { id: 'player-alice', name: 'Alice' });
+  await room.join(bob, { id: 'player-bob', name: 'Bob' });
+  assert.equal(room.game.turn, 0);
+  room.game.players[0].connected = false; // alice owns turn 0 but is gone
+
+  await room.move(bob, { cell: 9 }); // out of range
+
+  assert.equal(room.game.turn, 0); // takeover is rolled back
+  assert.equal(last(bob).type, 'error');
+  assert.match(last(bob).message, /Ô không hợp lệ/);
+});
+
+test('a hydrated xo game marks seats offline so newcomers can reclaim them', async () => {
+  const room = await xoRoom({
+    players: [
+      { id: 'player-alice', name: 'Alice', connected: true },
+      { id: 'player-bob', name: 'Bob', connected: true },
+    ],
+    board: ['X', '', '', '', '', '', '', '', ''],
+    turn: 1, gameOver: false, draw: false, winner: null, lastMove: null,
+  });
+  assert.ok(room.game.players.every((player) => player.connected === false));
+  assert.equal(room.summary().canJoin, true);
+
+  const carol = session('player-carol', 'Carol');
+  room.sockets.set(carol.socket, carol);
+  await room.join(carol, { id: 'player-carol', name: 'Carol' });
+  assert.equal(room.game.players.length, 2);
+  assert.ok(room.game.players.some((player) => player.id === 'player-carol'));
+  assert.equal(last(carol).type, 'state');
+});

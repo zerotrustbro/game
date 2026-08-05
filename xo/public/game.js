@@ -30,15 +30,16 @@ export function evaluateBoard(board, players) {
 }
 
 export function makeMove(game, playerId, cell) {
-  const index = Number(cell);
-  if (!Number.isInteger(index) || index < 0 || index >= SIZE * SIZE) return { ok: false, error: 'Ô không hợp lệ.' };
+  // Strict coercion guard: null, booleans, strings and arrays must never
+  // silently become cell 0.
+  if (typeof cell !== 'number' || !Number.isInteger(cell) || cell < 0 || cell >= SIZE * SIZE) return { ok: false, error: 'Ô không hợp lệ.' };
   if (game.gameOver) return { ok: false, error: 'Trận đã kết thúc.' };
-  if (game.board[index]) return { ok: false, error: 'Ô này đã được đánh.' };
+  if (game.board[cell]) return { ok: false, error: 'Ô này đã được đánh.' };
   const player = game.players[game.turn % Math.max(1, game.players.length)];
   if (!player || player.id !== playerId) return { ok: false, error: 'Chưa đến lượt bạn.' };
   const symbol = player.symbol;
   const board = [...game.board];
-  board[index] = symbol;
+  board[cell] = symbol;
   const result = evaluateBoard(board, game.players);
   return {
     ok: true,
@@ -49,7 +50,7 @@ export function makeMove(game, playerId, cell) {
       gameOver: result.gameOver,
       winner: result.winner,
       draw: result.draw,
-      lastMove: { player: playerId, cell: index, symbol },
+      lastMove: { player: playerId, cell, symbol },
     },
   };
 }

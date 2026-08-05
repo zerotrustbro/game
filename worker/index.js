@@ -150,7 +150,16 @@ export class Room {
     this.ready = state.storage.get('room').then(async (saved) => {
       const normalized = normalizeRoom(saved);
       this.room = normalized.room;
-      if (normalized.changed) await state.storage.put('room', this.room);
+      let changed = normalized.changed;
+      if (this.room.players.length) {
+        // DO rehydration: no WebSocket survives an eviction/restart, so every
+        // persisted seat is a ghost. Mark them offline so the seats (and the
+        // host role) can be reclaimed, and reopen a mid-game table as a lobby.
+        for (const player of this.room.players) if (player.connected) { player.connected = false; changed = true; }
+        if (this.room.phase === 'game') { this.room.phase = 'lobby'; this.room.game = null; this.room.roundId = null; changed = true; }
+        if (this.room.hostId) { this.room.hostId = null; changed = true; }
+      }
+      if (changed) await state.storage.put('room', this.room);
     });
   }
 
@@ -179,7 +188,7 @@ export class Room {
   summary(code, playerId) {
     const existing = playerId ? this.room.players.some((player) => player.id === playerId) : false;
     const players = this.room.players.length;
-    return { code, players, maxPlayers: MAX_PLAYERS, phase: this.room.phase, canJoin: Boolean(existing) || (this.room.phase !== 'game' && players < MAX_PLAYERS) };
+    return { code, players, maxPlayers: MAX_PLAYERS, phase: this.room.phase, canJoin: Boolean(existing) || (this.room.phase !== 'game' && players < MAX_PLAYERS) || this.room.players.some((player) => player.connected === false) };
   }
 
   async onMessage(session, raw) {
@@ -203,8 +212,12 @@ export class Room {
     const id = cleanId(message.id);
     if (session.playerId && session.playerId !== id) return this.error(session, 'Kết nối này đã gắn với người chơi khác.', true);
     const existing = this.room.players.find((player) => player.id === id);
-    if (!existing && this.room.players.length >= MAX_PLAYERS) return this.send(session.socket, { type: 'error', message: 'Phòng đã đủ 4 người.' });
-    if (this.room.phase === 'game' && !existing) return this.send(session.socket, { type: 'error', message: 'Ván đã bắt đầu, hãy vào ván kế tiếp.' });
+    if (!existing && this.room.players.length >= MAX_PLAYERS) {
+      const offline = this.room.players.find((player) => player.connected === false);
+      if (!offline) return this.error(session, 'Phòng đã đủ 4 người.', true);
+      this.room.players.splice(this.room.players.indexOf(offline), 1);
+    }
+    if (this.room.phase === 'game' && !existing) return this.error(session, 'Ván đã bắt đầu, hãy vào ván kế tiếp.', true);
     const playerId = existing?.id || id;
     if (existing) {
       existing.name = cleanName(message.name);
@@ -373,7 +386,7 @@ export class Room {
     const gamePlayers = new Map(game?.players.map((player) => [player.id, player]));
     const players = this.room.players.map((member) => {
       const gamePlayer = gamePlayers.get(member.id);
-      return { id: member.id, name: member.name, avatar: member.avatar, connected: member.connected, handCount: gamePlayer?.hand.length ?? 0, hand: member.id === playerId ? (gamePlayer?.hand || []) : undefined };
+      return { id: member.id, name: member.name, avatar: member.avatar, connected: member.connected, handCount: gamePlayer?.hand?.length ?? 0, hand: member.id === playerId ? (gamePlayer?.hand || []) : undefined };
     });
     return { type: 'state', you: playerId, phase: this.room.phase, roomCode: this.room.roomCode, hostId: this.room.hostId, players, turnPlayerId: game ? game.players[game.turnIndex]?.id : null, currentPlay: game?.currentPlay || null, gameOver: game?.gameOver || false, winner: game?.winner || null, action: action || null };
   }
@@ -400,12 +413,16 @@ function normalizePokiRoom(saved) {
   if (!saved || typeof saved !== 'object') return { room: initialRoom(), changed: false };
   let changed = !Array.isArray(saved.players);
   const usedIds = new Set();
+  const canonicalByOriginal = new Map();
+  const originalIds = new Map();
   const players = (Array.isArray(saved.players) ? saved.players : []).slice(0, POKI_MAX_PLAYERS).map((raw = {}) => {
     const player = raw && typeof raw === 'object' ? raw : {};
     const rawId = typeof player.id === 'string' ? player.id.trim() : '';
     let id = ID_PATTERN.test(rawId) && !usedIds.has(rawId) ? rawId : crypto.randomUUID();
     while (usedIds.has(id)) id = crypto.randomUUID();
     usedIds.add(id);
+    if (rawId && !canonicalByOriginal.has(rawId)) canonicalByOriginal.set(rawId, id);
+    if (rawId) originalIds.set(id, rawId);
     const normalized = {
       id,
       monster: POKI_MONSTER_IDS.includes(player.monster) ? player.monster : 'emberfox',
@@ -420,22 +437,32 @@ function normalizePokiRoom(saved) {
     && saved.board.every((row) => Array.isArray(row) && row.length === SIZE && row.every((gem) => POKI_GEMS.has(gem)));
   if (!boardOk) changed = true;
   const board = boardOk ? saved.board.map((row) => [...row]) : createBoard();
-  const battle = { players, board, hp: {}, mana: {}, shield: {}, turn: 0, gameOver: false, winner: undefined, loser: undefined, lastAction: saved.lastAction && typeof saved.lastAction === 'object' ? saved.lastAction : undefined };
+  let lastAction = saved.lastAction && typeof saved.lastAction === 'object' ? saved.lastAction : undefined;
+  if (lastAction?.player) {
+    const canonicalPlayer = canonicalByOriginal.get(lastAction.player) || lastAction.player;
+    if (canonicalPlayer !== lastAction.player) { lastAction = { ...lastAction, player: canonicalPlayer }; changed = true; }
+  }
+  const battle = { players, board, hp: {}, mana: {}, shield: {}, turn: 0, gameOver: false, winner: undefined, loser: undefined, lastAction };
   const read = (record, id, fallback, maximum) => {
+    // A repaired persisted ID keeps the values that were stored under the
+    // original key; fall back to the canonical ID for freshly-created seats.
     const value = Number(saved[record]?.[id]);
     const normalized = Number.isFinite(value) ? Math.min(maximum, Math.max(0, value)) : fallback;
     if (!Number.isFinite(value) || value !== normalized) changed = true;
     return normalized;
   };
   for (const player of players) {
-    battle.hp[player.id] = read('hp', player.id, MONSTERS[player.monster].maxHp, MONSTERS[player.monster].maxHp);
-    battle.mana[player.id] = read('mana', player.id, 0, 100);
-    battle.shield[player.id] = read('shield', player.id, 0, 200);
+    const readKey = originalIds.get(player.id) || player.id;
+    battle.hp[player.id] = read('hp', readKey, MONSTERS[player.monster].maxHp, MONSTERS[player.monster].maxHp);
+    battle.mana[player.id] = read('mana', readKey, 0, 100);
+    battle.shield[player.id] = read('shield', readKey, 0, 200);
   }
   battle.turn = Number.isInteger(saved.turn) && saved.turn >= 0 ? saved.turn : 0;
   if (!Number.isInteger(saved.turn) || saved.turn < 0) changed = true;
-  const winner = players.some((player) => player.id === saved.winner) ? saved.winner : undefined;
-  const loser = players.some((player) => player.id === saved.loser) && saved.loser !== winner ? saved.loser : undefined;
+  const canonicalWinner = saved.winner ? canonicalByOriginal.get(saved.winner) || saved.winner : undefined;
+  const canonicalLoser = saved.loser ? canonicalByOriginal.get(saved.loser) || saved.loser : undefined;
+  const winner = players.some((player) => player.id === canonicalWinner) ? canonicalWinner : undefined;
+  const loser = players.some((player) => player.id === canonicalLoser) && canonicalLoser !== winner ? canonicalLoser : undefined;
   battle.gameOver = Boolean(saved.gameOver) && Boolean(winner) && Boolean(loser);
   battle.winner = battle.gameOver ? winner : undefined;
   battle.loser = battle.gameOver ? loser : undefined;
@@ -465,7 +492,14 @@ export class PokiRoom {
     this.ready = state.storage.get('poki').then((saved) => {
       const normalized = normalizePokiRoom(saved);
       this.battle = normalized.room;
-      if (normalized.changed) return state.storage.put('poki', normalized.room);
+      let changed = normalized.changed;
+      if (this.battle.players.length && this.battle.players.some((player) => player.connected)) {
+        // DO rehydration: no WebSocket survives an eviction/restart, so every
+        // persisted seat is a ghost. Mark them offline so seats can be reclaimed.
+        for (const player of this.battle.players) player.connected = false;
+        changed = true;
+      }
+      if (changed) return state.storage.put('poki', this.battle);
     });
   }
 
@@ -566,6 +600,7 @@ export class PokiRoom {
     if (this.battle.players.length !== POKI_MAX_PLAYERS) return this.error(session, 'Bàn chưa đủ hai người chơi.');
     if (this.battle.gameOver) return this.error(session, 'Trận đấu đã kết thúc. Hãy đấu lại hoặc rời bàn.');
     let active = this.battle.players[this.battle.turn % POKI_MAX_PLAYERS];
+    const previousTurn = this.battle.turn;
     if (active?.id !== session.id) {
       // A disconnected opponent cannot act — let the connected player take over so the table never stalls.
       const requester = this.battle.players.find((player) => player.id === session.id);
@@ -574,9 +609,9 @@ export class PokiRoom {
       active = requester;
     }
     const { from, to } = message;
-    if (!from || !to || !Number.isInteger(from.x) || !Number.isInteger(from.y) || !Number.isInteger(to.x) || !Number.isInteger(to.y)) return this.error(session, 'Nước đi không hợp lệ.');
+    if (!from || !to || !Number.isInteger(from.x) || !Number.isInteger(from.y) || !Number.isInteger(to.x) || !Number.isInteger(to.y)) { this.battle.turn = previousTurn; return this.error(session, 'Nước đi không hợp lệ.'); }
     const result = resolveSwap(this.battle.board, from, to);
-    if (!result.valid) return this.error(session, 'Đổi hai gem kề nhau để tạo bộ 3.');
+    if (!result.valid) { this.battle.turn = previousTurn; return this.error(session, 'Đổi hai gem kề nhau để tạo bộ 3.'); }
     const self = this.battle.players.find((player) => player.id === session.id);
     const foe = this.battle.players.find((player) => player.id !== session.id);
     const hit = applyBattleDamage(this.battle, foe.id, result.damage);
@@ -597,6 +632,7 @@ export class PokiRoom {
     if (this.battle.players.length !== POKI_MAX_PLAYERS) return this.error(session, 'Bàn chưa đủ hai người chơi.');
     if (this.battle.gameOver) return this.error(session, 'Trận đấu đã kết thúc. Hãy đấu lại hoặc rời bàn.');
     let active = this.battle.players[this.battle.turn % POKI_MAX_PLAYERS];
+    const previousTurn = this.battle.turn;
     if (active?.id !== session.id) {
       // A disconnected opponent cannot act — let the connected player take over so the table never stalls.
       const requester = this.battle.players.find((player) => player.id === session.id);
@@ -606,7 +642,7 @@ export class PokiRoom {
     }
     const player = this.battle.players.find((p) => p.id === session.id);
     const skill = applySpecial(player.monster, this.battle.mana[session.id]);
-    if (!skill.valid) return this.error(session, 'Cần đủ 100 Mana để dùng kỹ năng.');
+    if (!skill.valid) { this.battle.turn = previousTurn; return this.error(session, 'Cần đủ 100 Mana để dùng kỹ năng.'); }
     const result = applySpecialTurn(this.battle, session.id, this.battle.mana[session.id], skill);
     this.battle = {
       ...result.state,
@@ -753,7 +789,14 @@ export class XoRoom {
     this.ready = state.storage.get('xo').then((saved) => {
       const normalized = normalizeXoGame(saved);
       this.game = normalized.game;
-      if (normalized.changed) return state.storage.put('xo', normalized.game);
+      let changed = normalized.changed;
+      if (this.game.players.length && this.game.players.some((player) => player.connected)) {
+        // DO rehydration: no WebSocket survives an eviction/restart, so every
+        // persisted seat is a ghost. Mark them offline so seats can be reclaimed.
+        for (const player of this.game.players) player.connected = false;
+        changed = true;
+      }
+      if (changed) return state.storage.put('xo', this.game);
     });
   }
 
@@ -847,6 +890,7 @@ export class XoRoom {
     if (this.game.players.length !== XO_MAX_PLAYERS) return this.error(session, 'Bàn chưa đủ hai người chơi.');
     if (this.game.gameOver) return this.error(session, 'Trận đấu đã kết thúc. Hãy đấu lại hoặc rời bàn.');
     const active = this.game.players[this.game.turn % Math.max(1, this.game.players.length)];
+    const previousTurn = this.game.turn;
     if (active?.id !== session.id) {
       // A disconnected opponent cannot act — let the connected player take over so the table never stalls.
       const requester = this.game.players.find((player) => player.id === session.id);
@@ -854,7 +898,7 @@ export class XoRoom {
       this.game.turn = this.game.players.indexOf(requester);
     }
     const result = xoMove(this.game, session.id, message.cell);
-    if (!result.ok) return this.error(session, result.error);
+    if (!result.ok) { this.game.turn = previousTurn; return this.error(session, result.error); }
     this.game = result.game;
     await this.save();
     this.broadcastState();
@@ -977,22 +1021,28 @@ async function xoRoomSummary(env, code, playerId) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname === '/api/rooms' && request.method === 'GET') {
+    if (url.pathname === '/api/rooms') {
+      if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
       const pid = url.searchParams.get('pid') || '';
       const rooms = await Promise.all(ROOM_CODES.map((code) => roomSummary(env, code, pid)));
       return json({ rooms });
     }
-    if (url.pathname === '/api/poki/rooms' && request.method === 'GET') {
+    if (url.pathname === '/api/poki/rooms') {
+      if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
       const pid = url.searchParams.get('pid') || '';
       const rooms = await Promise.all(POKI_ROOM_CODES.map((code) => pokiRoomSummary(env, code, pid)));
       return json({ rooms });
     }
-    if (url.pathname === '/api/xo/rooms' && request.method === 'GET') {
+    if (url.pathname === '/api/xo/rooms') {
+      if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
       const pid = url.searchParams.get('pid') || '';
       const rooms = await Promise.all(XO_ROOM_CODES.map((code) => xoRoomSummary(env, code, pid)));
       return json({ rooms });
     }
-    if (url.pathname === '/api/health') return json({ ok: true, service: 'game', games: ['tienlen', 'poki', 'xo'] });
+    if (url.pathname === '/api/health') {
+      if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
+      return json({ ok: true, service: 'game', games: ['tienlen', 'poki', 'xo'] });
+    }
     const pokiCode = pokiRoomCode(url.pathname);
     if (pokiCode) {
       if (!POKI_ROOM_CODES.includes(pokiCode.toUpperCase())) return json({ error: 'Không tìm thấy bàn này.' }, 404);
@@ -1017,6 +1067,7 @@ export default {
     if (url.pathname === '/xo' || url.pathname === '/xo/') {
       return env.ASSETS.fetch(new Request(new URL('/xo/index.html', url), request));
     }
+    if (url.pathname.startsWith('/api/')) return json({ error: 'Không tìm thấy API này.' }, 404);
     return env.ASSETS.fetch(request);
   },
 };

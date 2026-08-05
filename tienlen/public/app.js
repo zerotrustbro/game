@@ -14,6 +14,7 @@ const state = {
   avatar: Number(localStorage.getItem('tienlen-avatar') || 1),
   room: null,
   rooms: [],
+  roomsLoading: false,
   selected: new Set(),
   sound: localStorage.getItem('tienlen-sound') !== 'off',
   allowReconnect: false,
@@ -81,6 +82,8 @@ function renderRoomList() {
 }
 
 async function loadRooms() {
+  if (state.roomsLoading) return;
+  state.roomsLoading = true;
   try {
     const response = await fetch(`/api/rooms?pid=${encodeURIComponent(state.id)}`, { cache: 'no-store' });
     if (!response.ok) throw new Error('room list unavailable');
@@ -88,6 +91,8 @@ async function loadRooms() {
     state.rooms = Array.isArray(data.rooms) ? data.rooms : [];
   } catch {
     state.rooms = [];
+  } finally {
+    state.roomsLoading = false;
   }
   renderRoomList();
 }
@@ -101,7 +106,7 @@ function scheduleReconnect(code) {
   cancelReconnect();
   state.reconnectTimer = setTimeout(() => {
     state.reconnectTimer = null;
-    if (state.allowReconnect && state.roomCode === code && state.room) connect(code);
+    if (state.allowReconnect && state.roomCode === code) connect(code);
   }, 1600);
 }
 
@@ -132,7 +137,7 @@ function connect(code, { push = false } = {}) {
   socket.addEventListener('close', () => {
     if (state.socket !== socket) return;
     setConnection('Mất kết nối');
-    if (state.allowReconnect && state.room) scheduleReconnect(state.roomCode);
+    if (state.allowReconnect) scheduleReconnect(state.roomCode);
   });
   socket.addEventListener('error', () => {
     if (state.socket === socket) showToast('Không thể kết nối phòng này.', 'error');

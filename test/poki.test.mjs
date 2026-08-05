@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker, { PokiRoom } from '../worker/index.js';
-import { validMoves } from '../poki/public/game.js';
+import { createBoard, validMoves } from '../poki/public/game.js';
 
 function createSocket() {
   return {
@@ -305,4 +305,59 @@ test('a socket that never joined cannot restart a finished Poki match', async ()
 
   assert.equal(last(intruder).type, 'error');
   assert.equal(room.battle.gameOver, true);
+});
+
+test('persisted battle resources survive an id repair during rehydration', async () => {
+  const room = await pokiRoom({
+    players: [{ id: 'short', name: 'Alice', monster: 'emberfox', connected: true }],
+    board: createBoard(),
+    hp: { short: 123 }, mana: { short: 99 }, shield: { short: 7 },
+    turn: 0, gameOver: false,
+  });
+  const player = room.battle.players[0];
+  // 'short' fails the ID pattern and is repaired to a canonical UUID
+  assert.notEqual(player.id, 'short');
+  assert.match(player.id, /^[0-9a-f-]{36}$/);
+  // the values stored under the original key are preserved
+  assert.equal(room.battle.hp[player.id], 123);
+  assert.equal(room.battle.mana[player.id], 99);
+  assert.equal(room.battle.shield[player.id], 7);
+  // rehydration turns persisted seats into ghosts
+  assert.equal(player.connected, false);
+});
+
+test('an invalid poki move during offline takeover does not advance the turn', async () => {
+  const room = await pokiRoom();
+  const alice = session('player-alice', 'Alice');
+  const bob = session('player-bob', 'Bob');
+  await room.join(alice, { id: 'player-alice', name: 'Alice', monster: 'emberfox' });
+  await room.join(bob, { id: 'player-bob', name: 'Bob', monster: 'stonehorn' });
+  assert.equal(room.battle.turn, 0);
+  room.battle.players[0].connected = false; // alice owns turn 0 but is gone
+
+  await room.move(bob, { from: { x: 0, y: 0 }, to: { x: 5, y: 5 } }); // non-adjacent gems
+
+  assert.equal(room.battle.turn, 0); // takeover is rolled back
+  assert.equal(last(bob).type, 'error');
+  assert.match(last(bob).message, /kề nhau/);
+});
+
+test('a hydrated battle marks seats offline so newcomers can reclaim them', async () => {
+  const room = await pokiRoom({
+    players: [
+      { id: 'player-alice', name: 'Alice', monster: 'emberfox', connected: true },
+      { id: 'player-bob', name: 'Bob', monster: 'stonehorn', connected: true },
+    ],
+    board: createBoard(),
+    hp: { 'player-alice': 100, 'player-bob': 100 }, mana: {}, shield: {}, turn: 1, gameOver: false,
+  });
+  assert.ok(room.battle.players.every((player) => player.connected === false));
+  assert.equal(room.summary().canJoin, true);
+
+  const carol = session('player-carol', 'Carol');
+  room.sockets.set(carol.socket, carol);
+  await room.join(carol, { id: 'player-carol', name: 'Carol', monster: 'miubeo' });
+  assert.equal(room.battle.players.length, 2);
+  assert.ok(room.battle.players.some((player) => player.id === 'player-carol'));
+  assert.equal(last(carol).type, 'state');
 });

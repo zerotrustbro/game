@@ -9,6 +9,7 @@ let conn; // { ws, id, monster, code }
 let state; // battle state broadcast by the server
 let tables = [];
 let selectedTable = '';
+let tablesLoading = false;
 let selected;
 let notice = '';
 let effect = '';
@@ -74,13 +75,17 @@ function renderTables() {
 }
 
 async function loadTables() {
+  if (tablesLoading) return;
+  tablesLoading = true;
   try {
     const response = await fetch(`/api/poki/rooms?pid=${encodeURIComponent(id)}`, { cache: 'no-store' });
-    if (!response.ok) throw new Error('room list unavailable');
+    if (!response.ok) throw new Error('table list unavailable');
     const data = await response.json();
     tables = Array.isArray(data.rooms) ? data.rooms : [];
   } catch {
     tables = [];
+  } finally {
+    tablesLoading = false;
   }
 }
 
@@ -246,8 +251,13 @@ function move(point) {
 
 function playEffect() {
   const action = state?.lastAction;
-  const currentEffectToken = ++effectToken;
   if (!action) { effect = ''; render(); return; }
+  // Replays of the same last action (reconnect/refresh broadcasts) must not
+  // re-run sounds, board animation or the effect banner.
+  const actionKey = `${state.turn}:${action.player}:${action.special ? 'special' : 'move'}:${action.damage}:${action.healing}:${action.mana}:${action.cleared}`;
+  if (actionKey === lastActionKey) return;
+  lastActionKey = actionKey;
+  const currentEffectToken = ++effectToken;
   const animationToken = ++boardAnimationToken;
   const frames = action.frames ?? [];
   displayedBoard = frames[0]?.board;
@@ -263,14 +273,10 @@ function playEffect() {
       render();
     }, frames.length * 240);
   }
-  const actionKey = `${state.turn}:${action.player}:${action.special ? 'special' : 'move'}:${action.damage}:${action.healing}:${action.mana}:${action.cleared}`;
-  if (actionKey !== lastActionKey) {
-    lastActionKey = actionKey;
-    const attacker = state.players.find((player) => player.id === action.player);
-    if (attacker && (action.special || action.damage)) attackSound(attacker.monster, Boolean(action.special));
-    else if (action.healing) rewardSound('heal');
-    else if (action.mana) rewardSound('mana');
-  }
+  const attacker = state.players.find((player) => player.id === action.player);
+  if (attacker && (action.special || action.damage)) attackSound(attacker.monster, Boolean(action.special));
+  else if (action.healing) rewardSound('heal');
+  else if (action.mana) rewardSound('mana');
   if (state?.gameOver) {
     const resultKey = `${state.winner}:${state.loser}`;
     if (resultKey !== lastResultKey) { lastResultKey = resultKey; defeatSound(state.winner === conn.id); }

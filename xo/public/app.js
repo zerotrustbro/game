@@ -16,6 +16,8 @@ let rooms = [];
 let game = null; // { players, board, turn, gameOver, winner, draw, lastMove }
 let selectedTable = '';
 let sound = localStorage.getItem('xo-sound') !== 'off';
+let you = id; // server-issued canonical id (a legacy localStorage id may be remapped)
+let roomsLoading = false;
 
 function esc(value) {
   return String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char]);
@@ -60,6 +62,8 @@ function renderRoomList() {
 }
 
 async function loadRooms() {
+  if (roomsLoading) return;
+  roomsLoading = true;
   try {
     const response = await fetch(`/api/xo/rooms?pid=${encodeURIComponent(id)}`, { cache: 'no-store' });
     if (!response.ok) throw new Error('room list unavailable');
@@ -67,6 +71,8 @@ async function loadRooms() {
     rooms = Array.isArray(data.rooms) ? data.rooms : [];
   } catch {
     rooms = [];
+  } finally {
+    roomsLoading = false;
   }
   renderRoomList();
 }
@@ -103,6 +109,7 @@ function connect(code) {
       return;
     }
     if (message.type !== 'state') return;
+    you = message.you || you;
     game = message.game;
     lobbyView.classList.add('hidden');
     battleView.classList.remove('hidden');
@@ -121,23 +128,23 @@ function send(message) {
 }
 
 function myPlayer() {
-  return game?.players.find((player) => player.id === id);
+  return game?.players.find((player) => player.id === you);
 }
 
 function render() {
   if (!game) return;
   const me = myPlayer();
-  const foe = game.players.find((player) => player.id !== id);
+  const foe = game.players.find((player) => player.id !== you);
   const active = game.players[game.turn % Math.max(1, game.players.length)];
   // A disconnected opponent's turn belongs to the player who is still here.
-  const mine = active ? active.id === id || (active.connected === false && Boolean(me)) : false;
+  const mine = active ? active.id === you || (active.connected === false && Boolean(me)) : false;
   $('players').innerHTML = game.players.map((player) => {
-    const local = player.id === id;
+    const local = player.id === you;
     const current = active?.id === player.id && !game.gameOver;
     return `<div class="player-chip ${local ? 'local' : ''} ${current ? 'turn' : ''}"><b class="symbol ${player.symbol.toLowerCase()}">${player.symbol}</b><span>${esc(player.name)}${local ? ' (bạn)' : ''}${player.connected ? '' : ' · mất kết nối'}</span></div>`;
   }).join('') || '<div class="player-chip"><b class="symbol x">✕</b><span>Chờ đối thủ…</span></div>';
   $('battleTitle').textContent = game.gameOver
-    ? (game.draw ? 'Hòa cờ' : (game.winner === id ? 'Bạn thắng!' : `${game.players.find((p) => p.id === game.winner)?.name || 'Đối thủ'} thắng`))
+    ? (game.draw ? 'Hòa cờ' : (game.winner === you ? 'Bạn thắng!' : `${game.players.find((p) => p.id === game.winner)?.name || 'Đối thủ'} thắng`))
     : game.players.length < 2 ? 'Đang chờ người chơi' : mine ? 'Đến lượt bạn' : 'Đến lượt đối thủ';
   $('board').innerHTML = game.board.map((cell, index) => `<button class="cell ${cell ? cell.toLowerCase() : ''} ${game.lastMove?.cell === index ? 'last' : ''}" data-cell="${index}" ${cell || game.gameOver || game.players.length < 2 || !mine ? 'disabled' : ''}><span>${cell === 'X' ? '✕' : cell === 'O' ? '○' : ''}</span></button>`).join('');
   $('turnLine').textContent = game.gameOver
