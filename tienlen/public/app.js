@@ -9,10 +9,11 @@ const state = {
   socket: null,
   roomCode: '',
   playerId: null,
+  id: localStorage.getItem('player-id') || crypto.randomUUID(),
+  name: localStorage.getItem('game-nick') || '',
   avatar: Number(localStorage.getItem('tienlen-avatar') || 1),
   room: null,
   rooms: [],
-  user: null,
   selected: new Set(),
   sound: localStorage.getItem('tienlen-sound') !== 'off',
 };
@@ -21,16 +22,19 @@ const $ = (id) => document.getElementById(id);
 const hubView = $('hubView');
 const gameLobbyView = $('gameLobbyView');
 const roomView = $('roomView');
+const playerName = $('playerName');
+const topNick = $('nickname');
 const avatarPicker = $('avatarPicker');
 const roomList = $('roomList');
 const toast = $('toast');
 const connectionDot = $('connectionDot');
 const connectionText = $('connectionText');
 const initialRoute = parseRoute(location.pathname);
-const authPanel = $('authPanel');
-const authBackdrop = $('authBackdrop');
 let pendingRoomCode = null;
 
+localStorage.setItem('player-id', state.id);
+playerName.value = state.name;
+topNick.value = state.name;
 $('soundButton').textContent = state.sound ? '◖' : '◌';
 
 function esc(value) {
@@ -49,36 +53,11 @@ function setConnection(label, connected = false) {
   connectionDot.className = `connection-dot ${connected ? 'online' : ''}`;
 }
 
-function updateAccountUi() {
-  $('accountButton').textContent = state.user ? `${state.user.displayName} · ${state.user.coins} xu` : 'Tài khoản';
-  $('accountSummary').classList.toggle('hidden', !state.user);
-  $('authColumns').classList.toggle('hidden', Boolean(state.user));
-  $('authTitle').textContent = state.user ? 'Tài khoản của bạn' : 'Tài khoản Game Room';
-  $('accountName').textContent = state.user?.displayName || '—';
-  $('accountCoins').textContent = state.user?.coins ?? 0;
-  $('guestGate').classList.toggle('hidden', Boolean(state.user));
-  $('playerFields').classList.toggle('hidden', !state.user);
-  $('homeMessage').textContent = state.user ? 'Chọn một bàn để vào. Khi ván bắt đầu, bàn sẽ khóa.' : 'Đăng nhập để chọn bàn và vào chơi.';
-}
-
-function openAuth() {
-  $('authError').textContent = '';
-  authPanel.classList.remove('hidden');
-  authBackdrop.classList.remove('hidden');
-  document.body.classList.add('modal-open');
-}
-
-function closeAuth() {
-  authPanel.classList.add('hidden');
-  authBackdrop.classList.add('hidden');
-  document.body.classList.remove('modal-open');
-}
-
-async function authRequest(path, body) {
-  const response = await fetch(`/api/auth${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || 'Không thể xử lý tài khoản.');
-  return data.user;
+function saveNickname(value) {
+  state.name = value.trim().slice(0, 18);
+  localStorage.setItem('game-nick', state.name);
+  playerName.value = state.name;
+  topNick.value = state.name;
 }
 
 function renderRoomList() {
@@ -101,7 +80,7 @@ function renderRoomList() {
 
 async function loadRooms() {
   try {
-    const response = await fetch('/api/rooms', { cache: 'no-store' });
+    const response = await fetch(`/api/rooms?pid=${encodeURIComponent(state.id)}`, { cache: 'no-store' });
     if (!response.ok) throw new Error('room list unavailable');
     const data = await response.json();
     state.rooms = Array.isArray(data.rooms) ? data.rooms : [];
@@ -111,32 +90,9 @@ async function loadRooms() {
   renderRoomList();
 }
 
-async function loadAccount() {
-  try {
-    const response = await fetch('/api/auth/me');
-    if (response.ok) state.user = (await response.json()).user;
-  } catch {
-    // An unavailable auth endpoint should leave the visitor in guest mode.
-  }
-  updateAccountUi();
-  await loadRooms();
-  if (state.user && pendingRoomCode) {
-    const code = pendingRoomCode;
-    pendingRoomCode = null;
-    closeAuth();
-    connect(code);
-  }
-}
-
 function connect(code, { push = false } = {}) {
   state.roomCode = code.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
   if (!/^[A-Z0-9]{4,8}$/.test(state.roomCode)) return showToast('Mã phòng cần có 4–8 ký tự.', 'error');
-  if (!state.user) {
-    pendingRoomCode = state.roomCode;
-    showGameLobby(state.roomCode);
-    openAuth();
-    return;
-  }
   history[push ? 'pushState' : 'replaceState']({}, '', roomPath(state.roomCode));
   if (state.socket) state.socket.close();
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -145,7 +101,7 @@ function connect(code, { push = false } = {}) {
   setConnection('Đang kết nối…');
   socket.addEventListener('open', () => {
     setConnection('Đã kết nối', true);
-    socket.send(JSON.stringify({ type: 'join', avatar: state.avatar }));
+    socket.send(JSON.stringify({ type: 'join', id: state.id, name: state.name || 'Người chơi', avatar: state.avatar }));
   });
   socket.addEventListener('message', (event) => {
     try {
@@ -203,7 +159,7 @@ function showGameLobby(roomCode = null) {
   setConnection('Chưa kết nối');
   const inviteNote = $('inviteNote');
   inviteNote.classList.toggle('hidden', !roomCode);
-  inviteNote.textContent = roomCode ? `Bạn được mời vào phòng ${roomCode}. Đăng nhập rồi chọn bàn ${roomCode} để vào.` : '';
+  inviteNote.textContent = roomCode ? `Bạn được mời vào phòng ${roomCode}. Chọn bàn ${roomCode} để vào.` : '';
   renderRoomList();
 }
 
@@ -248,14 +204,9 @@ function renderRoom() {
   $('startButton').classList.toggle('hidden', room.phase !== 'lobby' || !isHost);
   $('rematchButton').classList.toggle('hidden', !room.gameOver || !isHost);
   $('roomTitle').textContent = room.gameOver ? `${room.winner === room.you ? 'Bạn thắng ván này' : 'Ván đã kết thúc'}` : room.phase === 'game' ? (isTurn ? 'Đến lượt bạn' : 'Đang trong ván') : 'Đang chờ người chơi';
-  if (room.wallet !== null && state.user) {
-    state.user.coins = room.wallet;
-    updateAccountUi();
-  }
   $('turnKicker').textContent = room.gameOver ? 'KẾT QUẢ' : room.phase === 'game' ? (isTurn ? 'LƯỢT CỦA BẠN' : `LƯỢT ${room.players.find((player) => player.id === room.turnPlayerId)?.name || ''}`) : 'PHÒNG CHỜ';
   renderCurrentPlay(room);
-  const settlement = room.settlement?.changes?.find((change) => change.playerId === room.you);
-  $('tableStatus').textContent = room.gameOver ? `${room.winner === room.you ? 'Chúc mừng — bạn là người hết bài trước.' : `${esc(room.players.find((player) => player.id === room.winner)?.name || 'Đối thủ')} đã thắng.`} ${settlement ? `${settlement.amount >= 0 ? '+' : ''}${settlement.amount} xu.` : ''}` : room.phase === 'game' ? (isTurn ? 'Chọn bài trên tay rồi đánh.' : 'Theo dõi lượt của đối thủ.') : (players.length < 2 ? 'Cần ít nhất 2 người để bắt đầu.' : (isHost ? 'Bạn có thể bắt đầu ván.' : 'Đợi chủ phòng bắt đầu ván.'));
+  $('tableStatus').textContent = room.gameOver ? `${room.winner === room.you ? 'Chúc mừng — bạn là người hết bài trước.' : `${esc(room.players.find((player) => player.id === room.winner)?.name || 'Đối thủ')} đã thắng.`}` : room.phase === 'game' ? (isTurn ? 'Chọn bài trên tay rồi đánh.' : 'Theo dõi lượt của đối thủ.') : (players.length < 2 ? 'Cần ít nhất 2 người để bắt đầu.' : (isHost ? 'Bạn có thể bắt đầu ván.' : 'Đợi chủ phòng bắt đầu ván.'));
   renderHand(room, isTurn);
 }
 
@@ -268,9 +219,9 @@ function renderCurrentPlay(room) {
       : '<span class="played-empty">Mời thêm người chơi để bắt đầu</span>';
     return;
   }
-  const playerName = esc(room.players.find((player) => player.id === current.playerId)?.name || 'Người chơi');
+  const playerNameText = esc(room.players.find((player) => player.id === current.playerId)?.name || 'Người chơi');
   const countClass = Math.min(current.cards.length, 8);
-  $('lastPlay').innerHTML = `<div class="played-by"><b>${playerName}</b> vừa đánh</div><div class="played-cards count-${countClass}" aria-label="Bộ bài vừa đánh">${current.cards.map(tableCardMarkup).join('')}</div>`;
+  $('lastPlay').innerHTML = `<div class="played-by"><b>${playerNameText}</b> vừa đánh</div><div class="played-cards count-${countClass}" aria-label="Bộ bài vừa đánh">${current.cards.map(tableCardMarkup).join('')}</div>`;
 }
 
 function tableCardMarkup(card, index) {
@@ -314,9 +265,13 @@ $('hand').addEventListener('click', (event) => {
 roomList.addEventListener('click', (event) => {
   const button = event.target.closest('[data-room-code]');
   if (!button || button.disabled) return;
+  if (playerName.value.trim()) saveNickname(playerName.value);
   connect(button.dataset.roomCode, { push: true });
 });
-$('gateLogin').addEventListener('click', openAuth);
+playerName.addEventListener('input', () => saveNickname(playerName.value));
+topNick.addEventListener('input', () => saveNickname(topNick.value));
+playerName.addEventListener('keydown', (event) => { if (event.key === 'Enter') roomList.querySelector('.room-choice:not(:disabled)')?.click(); });
+topNick.addEventListener('keydown', (event) => { if (event.key === 'Enter' && !gameLobbyView.classList.contains('hidden')) roomList.querySelector('.room-choice:not(:disabled)')?.click(); });
 $('startButton').addEventListener('click', () => send({ type: 'start' }));
 $('rematchButton').addEventListener('click', () => send({ type: 'restart' }));
 $('playButton').addEventListener('click', () => {
@@ -335,42 +290,8 @@ $('soundButton').addEventListener('click', () => {
   $('soundButton').textContent = state.sound ? '◖' : '◌';
 });
 
-$('accountButton').addEventListener('click', openAuth);
-$('authClose').addEventListener('click', closeAuth);
-authBackdrop.addEventListener('click', closeAuth);
-document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && !authPanel.classList.contains('hidden')) closeAuth();
-});
-async function finishAuth(user) {
-  state.user = user;
-  updateAccountUi();
-  await loadRooms();
-  closeAuth();
-  if (pendingRoomCode) { const code = pendingRoomCode; pendingRoomCode = null; connect(code); }
-}
-$('loginForm').addEventListener('submit', async (event) => {
-  event.preventDefault();
-  try { await finishAuth(await authRequest('/login', { username: $('loginUsername').value, password: $('loginPassword').value })); }
-  catch (error) { $('authError').textContent = error.message; }
-});
-$('registerForm').addEventListener('submit', async (event) => {
-  event.preventDefault();
-  try { await finishAuth(await authRequest('/register', { username: $('registerUsername').value, displayName: $('registerDisplayName').value, password: $('registerPassword').value })); }
-  catch (error) { $('authError').textContent = error.message; }
-});
-$('logoutButton').addEventListener('click', async () => {
-  await fetch('/api/auth/logout', { method: 'POST' });
-  state.user = null;
-  state.socket?.close();
-  state.socket = null;
-  updateAccountUi();
-  await loadRooms();
-  closeAuth();
-  showHub();
-});
-
 renderAvatarPicker();
-loadAccount();
+loadRooms();
 setInterval(() => {
   if (!gameLobbyView.classList.contains('hidden')) loadRooms();
 }, 5000);

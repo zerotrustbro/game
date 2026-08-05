@@ -3,14 +3,11 @@ import { attackSound, creatureVoice, defeatSound, rewardSound, setSoundEnabled, 
 import { POKI_ROOM_CODES, isPokiRoomCode, pokiGamePath, pokiRoomUrl, pokiTableLabel } from './routes.js';
 
 const app = document.querySelector('#app');
-const authPanel = document.querySelector('#authPanel');
-const authBackdrop = document.querySelector('#authBackdrop');
 const toast = document.querySelector('#toast');
 
 let conn; // { ws, id, monster, code }
 let state; // battle state broadcast by the server
 let tables = [];
-let user = null;
 let selectedTable = '';
 let selected;
 let notice = '';
@@ -21,15 +18,20 @@ let lastResultKey = '';
 let receivedRoomState = false;
 let displayedBoard;
 let boardAnimationToken = 0;
-let pendingTable = null;
 
+const id = localStorage.getItem('player-id') || crypto.randomUUID();
+localStorage.setItem('player-id', id);
 const monsterIds = Object.keys(MONSTERS);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const art = (id, alt = MONSTERS[id].name) => `<img src="/poki/creatures/${id}.webp" alt="${esc(alt)}">`;
+const art = (mid, alt = MONSTERS[mid].name) => `<img src="/poki/creatures/${mid}.webp" alt="${esc(alt)}">`;
 const normalizeRoom = (value) => String(value || '').trim().toUpperCase();
 
-function skillSummary(id) {
-  const s = MONSTERS[id].skill;
+function nickname() {
+  return (localStorage.getItem('game-nick') || '').trim().slice(0, 18) || 'Người chơi';
+}
+
+function skillSummary(mid) {
+  const s = MONSTERS[mid].skill;
   return `${s.damage} sát thương${s.healing ? ` · +${s.healing} HP` : ''}${s.manaDrain ? ` · −${s.manaDrain} Mana` : ''}${s.selfDamage ? ` · phản lực ${s.selfDamage}` : ''}${s.shield ? ` · khiên ${s.shield}` : ''}`;
 }
 
@@ -72,7 +74,7 @@ function renderTables() {
 
 async function loadTables() {
   try {
-    const response = await fetch('/api/poki/rooms', { cache: 'no-store' });
+    const response = await fetch(`/api/poki/rooms?pid=${encodeURIComponent(id)}`, { cache: 'no-store' });
     if (!response.ok) throw new Error('room list unavailable');
     const data = await response.json();
     tables = Array.isArray(data.rooms) ? data.rooms : [];
@@ -85,19 +87,17 @@ function renderLobby() {
   const requested = normalizeRoom(new URLSearchParams(location.search).get('room') || '');
   if (isPokiRoomCode(requested)) selectedTable = requested;
   const monster = MONSTERS[preview];
-  const accountBlock = user
-    ? `<div class="account-area"><span class="mini-label">ĐANG ĐĂNG NHẬP</span><div class="account-chip"><b>${esc(user.displayName)}</b><button class="account-action" id="logout" type="button">ĐĂNG XUẤT</button></div></div>`
-    : `<div class="account-area"><span class="mini-label">GAME ROOM ACCOUNT</span><button class="login-link" id="login" type="button">🔑 ĐĂNG NHẬP / TẠO TÀI KHOẢN</button></div>`;
+  const savedNick = localStorage.getItem('game-nick') || '';
   app.innerHTML = `<main class="select-screen">
     <div class="select-top"><a class="hub-link" href="/">← GAME ROOM</a><div class="brand">POKI <i>DUEL</i></div><div class="select-meta">ORIGINAL CREATURE BATTLE <b>${monsterIds.length} / ${monsterIds.length}</b><button class="sound-toggle" id="sound" aria-label="Bật hoặc tắt âm thanh">${soundEnabled() ? '🔊 ÂM THANH' : '🔇 TẮT ÂM'}</button></div></div>
     <section class="select-layout">
-      <nav class="roster"><p class="eyebrow">CHỌN CHIẾN BINH</p>${monsterIds.map((id) => {
-        const m = MONSTERS[id];
-        return `<button class="roster-item ${id === preview ? 'active' : ''}" data-monster="${id}"><span>${art(id)}</span><b>${m.name}</b><small>${m.skill.name}</small></button>`;
+      <nav class="roster"><p class="eyebrow">CHỌN CHIẾN BINH</p>${monsterIds.map((mid) => {
+        const m = MONSTERS[mid];
+        return `<button class="roster-item ${mid === preview ? 'active' : ''}" data-monster="${mid}"><span>${art(mid)}</span><b>${m.name}</b><small>${m.skill.name}</small></button>`;
       }).join('')}</nav>
       <section class="showcase monster-${preview}"><div class="showcase-backdrop"></div><div class="creature-large">${art(preview)}</div><div class="creature-plaque"><span>POKI CREATURE / 0${monsterIds.indexOf(preview) + 1}</span><h1>${MONSTERS[preview].name}</h1><p>${skillSummary(preview)}</p></div></section>
       <aside class="loadout"><p class="eyebrow">HỒ SƠ CHIẾN ĐẤU</p><h2>${monster.skill.name}</h2><p class="loadout-copy">Một chiến binh nguyên bản với nhịp chơi riêng. Ghép Kiếm để tấn công, Tim để hồi HP, Mana để mở tuyệt kỹ.</p><div class="stat"><span>SỨC MẠNH TUYỆT KỸ</span><b>${monster.skill.damage}</b></div><div class="stat"><span>HP KHỞI ĐẦU</span><b>${monster.maxHp}</b></div><div class="stat"><span>MANA KHỞI ĐẦU</span><b>0</b></div><div class="loadout-rule"><i>⚔</i><span>Ghép 3 gem cùng loại<br><small>Không có kỹ năng chủ động trước khi đủ 100 Mana.</small></span></div>
-      ${accountBlock}
+      <div class="nick-area"><span class="mini-label">BIỆT DANH</span><input id="nick" class="nick-input" maxlength="18" placeholder="Tên hiển thị của bạn" autocomplete="nickname" value="${esc(savedNick)}" /></div>
       <p class="eyebrow tables-eyebrow">CHỌN BÀN · 1VS1 · ${POKI_ROOM_CODES.length} BÀN</p>
       <div class="table-list" id="tableList"></div>
       <button class="enter" id="enter">VÀO TRẬN VỚI ${monster.name.toUpperCase()} <span>→</span></button></aside>
@@ -108,28 +108,20 @@ function renderLobby() {
     button.onclick = () => { preview = button.dataset.monster; creatureVoice(preview); renderLobby(); };
   });
   document.querySelector('#sound').onclick = () => { setSoundEnabled(!soundEnabled()); renderLobby(); };
-  document.querySelector('#enter').addEventListener('click', enterTable);
-  document.querySelector('#login')?.addEventListener('click', openAuth);
-  document.querySelector('#logout')?.addEventListener('click', async () => {
-    await fetch('/api/auth/logout', { method: 'POST' });
-    user = null;
-    renderLobby();
+  document.querySelector('#nick').addEventListener('input', (event) => {
+    localStorage.setItem('game-nick', event.target.value.trim().slice(0, 18));
   });
+  document.querySelector('#enter').addEventListener('click', enterTable);
 }
 
 function enterTable() {
   unlockAudio();
   if (!selectedTable) return showToast('Hãy chọn một bàn để vào trận.', 'error');
-  if (!user) {
-    pendingTable = selectedTable;
-    openAuth();
-    return;
-  }
   connect(selectedTable, preview);
 }
 
 function connect(code, monster) {
-  conn = { ws: null, id: null, monster, code };
+  conn = { ws: null, id, monster, code };
   receivedRoomState = false;
   lastActionKey = '';
   lastResultKey = '';
@@ -139,7 +131,7 @@ function connect(code, monster) {
   app.innerHTML = `<main class="connecting"><div class="brand">POKI <i>DUEL</i></div><div class="loader"></div><p>ĐANG MỞ ĐẤU TRƯỜNG…</p></main>`;
   const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/poki/room/${code}`);
   conn.ws = ws;
-  ws.onopen = () => ws.send(JSON.stringify({ type: 'join', monster }));
+  ws.onopen = () => ws.send(JSON.stringify({ type: 'join', id, name: nickname(), monster }));
   ws.onmessage = (event) => {
     let message;
     try { message = JSON.parse(event.data); } catch { return; }
@@ -262,73 +254,8 @@ function playEffect() {
   window.setTimeout(() => { effect = ''; render(); }, 1500);
 }
 
-// ---- Shared Game Room account ----
-function openAuth() {
-  document.querySelector('#authError').textContent = '';
-  authPanel.classList.remove('hidden');
-  authBackdrop.classList.remove('hidden');
-  document.body.classList.add('modal-open');
-}
-
-function closeAuth() {
-  authPanel.classList.add('hidden');
-  authBackdrop.classList.add('hidden');
-  document.body.classList.remove('modal-open');
-}
-
-async function authRequest(path, body) {
-  const response = await fetch(`/api/auth${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || 'Không thể xử lý tài khoản.');
-  return data.user;
-}
-
-async function loadAccount() {
-  try {
-    const response = await fetch('/api/auth/me');
-    if (response.ok) user = (await response.json()).user;
-  } catch {
-    user = null;
-  }
-}
-
-async function finishAuth(account) {
-  user = account;
-  closeAuth();
-  await loadTables();
-  if (pendingTable) {
-    const code = pendingTable;
-    pendingTable = null;
-    connect(code, preview);
-    return;
-  }
-  renderLobby();
-}
-
-document.querySelector('#authClose').addEventListener('click', closeAuth);
-authBackdrop.addEventListener('click', closeAuth);
-document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && !authPanel.classList.contains('hidden')) closeAuth();
-});
-document.querySelector('#loginForm').addEventListener('submit', async (event) => {
-  event.preventDefault();
-  try { await finishAuth(await authRequest('/login', { username: document.querySelector('#loginUsername').value, password: document.querySelector('#loginPassword').value })); }
-  catch (error) { document.querySelector('#authError').textContent = error.message; }
-});
-document.querySelector('#registerForm').addEventListener('submit', async (event) => {
-  event.preventDefault();
-  try {
-    await finishAuth(await authRequest('/register', {
-      username: document.querySelector('#registerUsername').value,
-      displayName: document.querySelector('#registerDisplayName').value,
-      password: document.querySelector('#registerPassword').value,
-    }));
-  } catch (error) { document.querySelector('#authError').textContent = error.message; }
-});
-
 // ---- Boot ----
 (async function boot() {
-  await loadAccount();
   await loadTables();
   renderLobby();
   setInterval(async () => {

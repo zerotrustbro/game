@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#071b1d" />
+    <meta name="description" content="XO — cờ ca-rô 3×3 realtime 1vs1 trong hệ sinh thái Game Room." />
+    <title>XO — Cờ ca-rô</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/xo/xo.css?v=xo-1" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="Về Game Room hub"><span class="brand-mark">✕</span><span><b>XO</b><small>CỜ CA-RÔ</small></span></a>
+        <div class="topbar-right"><label class="nick-field" for="nickname"><span>BIỆT DANH</span><input id="nickname" class="nick-input" maxlength="18" placeholder="Tên của bạn" autocomplete="nickname" /></label><button class="icon-button" id="soundButton" type="button" aria-label="Bật tắt âm thanh">◖</button></div>
+      </header>
+      <main>
+        <section id="lobbyView">
+          <div class="hero-copy"><p class="eyebrow">CỜ CA-RÔ TRỰC TUYẾN</p><h1>XO<br /><em>Cờ ca-rô</em></h1><p class="hero-lead">Ba ô liền một hàng là thắng.<br />Chọn một trong năm bàn đang mở, mỗi bàn 2 người.</p><div class="hero-rule"><span></span><i>✕ ○ ✕ ○ ✕</i><span></span></div></div>
+          <div class="lobby-card">
+            <div class="lobby-card-header"><span class="mini-label">CHỌN BÀN</span><span class="players-badge">5 BÀN · 1VS1</span></div>
+            <label class="field-label" for="playerName">Biệt danh của bạn</label><input id="playerName" class="text-input" maxlength="18" placeholder="Tên hiển thị ở bàn chơi" autocomplete="nickname" />
+            <div id="roomList" class="room-list" aria-live="polite"><p class="room-list-loading">Đang tải danh sách bàn…</p></div>
+            <p class="form-note">Nhập biệt danh rồi chọn một bàn để vào. Người vào trước đi ✕, người sau đi ○.</p>
+          </div>
+        </section>
+        <section id="battleView" class="hidden">
+          <div class="battle-head"><div><p class="eyebrow">BÀN <strong id="roomCodeLabel">—</strong></p><h2 id="battleTitle">Đang chờ người chơi</h2></div><div class="battle-actions"><button class="ghost-button danger" id="leaveButton" type="button">Rời bàn</button></div></div>
+          <div class="board-wrap">
+            <div class="players" id="players"></div>
+            <div class="xo-board" id="board" aria-live="polite"></div>
+            <p class="turn-line" id="turnLine">Mời thêm người chơi để bắt đầu</p>
+            <button class="primary-button compact hidden" id="rematchButton" type="button">Đấu lại <b>↻</b></button>
+          </div>
+        </section>
+      </main>
+      <div class="toast" id="toast" role="status"></div>
+    </div>
+    <script type="module" src="/xo/app.js?v=xo-1"></script>
+  </body>
+</html>

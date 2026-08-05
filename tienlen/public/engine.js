@@ -95,8 +95,6 @@ function hasAllCards(player, cards) {
 export function createGame(players, options = {}) {
   const normalized = players.map((player) => ({
     id: String(player.id),
-    accountId: player.accountId ? String(player.accountId) : undefined,
-    username: player.username ? String(player.username) : undefined,
     name: String(player.name || 'Người chơi'),
     avatar: Number.isInteger(player.avatar) ? player.avatar : 1,
     hand: [...(player.hand || [])].sort(cardSort),

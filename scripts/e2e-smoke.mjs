@@ -1,23 +1,14 @@
-// Temporary E2E smoke test against the dev mock server (real AccountStore + PokiRoom code).
+// E2E smoke test against the dev mock server (real Room + PokiRoom + XoRoom code).
+// Usage: node scripts/dev-mock.mjs  (in another terminal)  →  node scripts/e2e-smoke.mjs
 import { validMoves } from '../poki/public/game.js';
 
 const BASE = 'http://localhost:8798';
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const playerId = () => crypto.randomUUID();
 
-async function register(username) {
-  const response = await fetch(`${BASE}/api/auth/register`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ username, displayName: username.toUpperCase(), password: 'secret-123' }),
-  });
-  if (response.status !== 201) throw new Error(`register ${username} failed: ${response.status}`);
-  const cookie = response.headers.get('set-cookie').split(';')[0];
-  return { user: (await response.json()).user, cookie };
-}
-
-function openBattle(cookie, code) {
+function openBattle(path, query) {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(`ws://localhost:8798/api/poki/room/${code}`, { headers: { Cookie: cookie } });
+    const ws = new WebSocket(`ws://localhost:8798${path}${query ? `?${query}` : ''}`);
     const received = [];
     ws.onopen = () => resolve({ ws, received });
     ws.onerror = (error) => reject(error);
@@ -35,59 +26,82 @@ const waitFor = async (received, predicate, label, timeoutMs = 4000) => {
   throw new Error(`timeout waiting for ${label}; got ${JSON.stringify(received.map((m) => m.type))}`);
 };
 
-const alice = await register('e2ealpha');
-const bob = await register('e2ebeta');
+// ---- Poki 1v1 ----
+{
+  const roomsResponse = await fetch(`${BASE}/api/poki/rooms`);
+  const rooms = (await roomsResponse.json()).rooms;
+  console.log('poki rooms:', rooms.map((room) => `${room.code}:${room.players}/2`).join(', '));
+  if (rooms.length !== 5 || !rooms.every((room) => room.maxPlayers === 2)) throw new Error('poki must expose 5× 1v1 tables');
 
-const roomsResponse = await fetch(`${BASE}/api/poki/rooms`);
-const rooms = (await roomsResponse.json()).rooms;
-console.log('rooms:', rooms.map((room) => `${room.code}:${room.players}/2 ${room.phase}`).join(', '));
-if (rooms.length !== 5) throw new Error(`expected 5 tables, got ${rooms.length}`);
-if (!rooms.every((room) => room.maxPlayers === 2)) throw new Error('tables must be 1v1 (max 2)');
+  const alice = await openBattle('/api/poki/room/POKI01');
+  alice.ws.send(JSON.stringify({ type: 'join', id: playerId(), name: 'Alice', monster: 'emberfox' }));
+  const aliceJoined = await waitFor(alice.received, (m) => m.type === 'state' && m.battle.players.length === 1, 'alice joined');
+  console.log('alice joined POKI01:', aliceJoined.battle.players[0].name);
 
-// rooms listing with alice's cookie (after joining, canJoin should stay true for her)
-const aliceRoom = await openBattle(alice.cookie, 'POKI01');
-const aliceState = await waitFor(aliceRoom.received, (m) => m.type === 'state', 'alice initial state');
-aliceRoom.ws.send(JSON.stringify({ type: 'join', monster: 'emberfox' }));
-const aliceJoined = await waitFor(aliceRoom.received, (m) => m.type === 'state' && m.battle.players.length === 1, 'alice joined');
-console.log('alice joined POKI01:', aliceJoined.battle.players.map((p) => `${p.name}:${p.monster}`).join(', '));
+  const bob = await openBattle('/api/poki/room/POKI01');
+  bob.ws.send(JSON.stringify({ type: 'join', id: playerId(), name: 'Bob', monster: 'stonehorn' }));
+  const both = await waitFor(bob.received, (m) => m.type === 'state' && m.battle.players.length === 2, 'bob joined');
+  console.log('poki battle started:', both.battle.players.map((p) => p.name).join(' vs '));
 
-const bobRoom = await openBattle(bob.cookie, 'POKI01');
-bobRoom.ws.send(JSON.stringify({ type: 'join', monster: 'stonehorn' }));
-const both = await waitFor(bobRoom.received, (m) => m.type === 'state' && m.battle.players.length === 2, 'both players present');
-console.log('battle started — turn:', both.battle.turn, 'players:', both.battle.players.map((p) => p.monster).join(' vs '));
+  const move = validMoves(both.battle.board)[0];
+  alice.ws.send(JSON.stringify({ type: 'move', from: move.from, to: move.to }));
+  const afterMove = await waitFor(bob.received, (m) => m.type === 'state' && m.battle.lastAction?.player === aliceJoined.you, 'bob sees alice move');
+  console.log('poki move ok — turn', afterMove.battle.turn, '| damage:', afterMove.battle.lastAction.damage);
 
-const move = validMoves(both.battle.board)[0];
-console.log('alice moves', JSON.stringify(move));
-aliceRoom.ws.send(JSON.stringify({ type: 'move', from: move.from, to: move.to }));
-const afterMove = await waitFor(both.battle && bobRoom.received, (m) => m.type === 'state' && m.battle.lastAction?.player === alice.user.id, 'bob sees alice move');
-console.log('turn advanced to', afterMove.battle.turn, '| lastAction damage:', afterMove.battle.lastAction.damage, 'cleared:', afterMove.battle.lastAction.cleared);
+  bob.ws.send(JSON.stringify({ type: 'move', from: { x: 0, y: 0 }, to: { x: 1, y: 0 } }));
+  await waitFor(bob.received, (m) => m.type === 'error', 'out-of-turn rejected');
+  console.log('out-of-turn rejected: OK');
 
-// bob tries to move out of turn → error
-bobRoom.ws.send(JSON.stringify({ type: 'move', from: { x: 0, y: 0 }, to: { x: 1, y: 0 } }));
-await waitFor(bobRoom.received, (m) => m.type === 'error', 'bob out-of-turn error');
-console.log('out-of-turn move rejected: OK');
+  alice.ws.send(JSON.stringify({ type: 'leave' }));
+  await waitFor(bob.received, (m) => m.type === 'state' && m.battle.players.length === 1, 'alice left');
+  alice.ws.close(); bob.ws.close();
+}
 
-// alice leaves; bob should see the table return to waiting
-aliceRoom.ws.send(JSON.stringify({ type: 'leave' }));
-await waitFor(bobRoom.received, (m) => m.type === 'state' && m.battle.players.length === 1, 'bob waiting again');
-console.log('alice left — table back to 1 player');
+// ---- XO ----
+{
+  const roomsResponse = await fetch(`${BASE}/api/xo/rooms`);
+  const rooms = (await roomsResponse.json()).rooms;
+  console.log('xo rooms:', rooms.map((room) => `${room.code}:${room.players}/2`).join(', '));
+  if (rooms.length !== 5) throw new Error('xo must expose 5 tables');
 
-// third player cannot join a full 2/2 table elsewhere? test POKI02 full rejection
-const carolRoom = await openBattle(alice.cookie, 'POKI02');
-const daveRoom = await openBattle(bob.cookie, 'POKI02');
-carolRoom.ws.send(JSON.stringify({ type: 'join', monster: 'miubeo' }));
-await waitFor(carolRoom.received, (m) => m.type === 'state' && m.battle.players.length === 1, 'carol in POKI02');
-daveRoom.ws.send(JSON.stringify({ type: 'join', monster: 'tidefin' }));
-await waitFor(daveRoom.received, (m) => m.type === 'state' && m.battle.players.length === 2, 'dave in POKI02');
-const eve = await register('e2eeve');
-const eveRoom = await openBattle(eve.cookie, 'POKI02');
-eveRoom.ws.send(JSON.stringify({ type: 'join', monster: 'voltwing' }));
-const eveError = await waitFor(eveRoom.received, (m) => m.type === 'error', 'eve rejected');
-console.log('third player rejected from full table:', eveError.message, '| fatal:', eveError.fatal);
+  const alice = await openBattle('/api/xo/room/XO01');
+  alice.ws.send(JSON.stringify({ type: 'join', id: playerId(), name: 'Alice' }));
+  await waitFor(alice.received, (m) => m.type === 'state' && m.game.players.length === 1, 'alice in XO01');
 
-aliceRoom.ws.close();
-bobRoom.ws.close();
-carolRoom.ws.close();
-daveRoom.ws.close();
-eveRoom.ws.close();
+  const bob = await openBattle('/api/xo/room/XO01');
+  bob.ws.send(JSON.stringify({ type: 'join', id: playerId(), name: 'Bob' }));
+  const start = await waitFor(bob.received, (m) => m.type === 'state' && m.game.players.length === 2, 'bob in XO01');
+  console.log('xo symbols:', start.game.players.map((p) => `${p.name}:${p.symbol}`).join(' '));
+
+  alice.ws.send(JSON.stringify({ type: 'move', cell: 0 }));
+  await waitFor(bob.received, (m) => m.type === 'state' && m.game.board[0] === 'X', 'X placed');
+  bob.ws.send(JSON.stringify({ type: 'move', cell: 0 }));
+  await waitFor(bob.received, (m) => m.type === 'error', 'occupied cell rejected');
+  bob.ws.send(JSON.stringify({ type: 'move', cell: 3 }));
+  await waitFor(alice.received, (m) => m.type === 'state' && m.game.board[3] === 'O', 'O placed');
+  console.log('xo moves ok');
+
+  alice.ws.send(JSON.stringify({ type: 'leave' }));
+  await waitFor(bob.received, (m) => m.type === 'state' && m.game.players.length === 1, 'alice left XO');
+  alice.ws.close(); bob.ws.close();
+}
+
+// ---- Tiến Lên lobby (nickname join) ----
+{
+  const roomsResponse = await fetch(`${BASE}/api/rooms`);
+  const rooms = (await roomsResponse.json()).rooms;
+  console.log('tienlen rooms:', rooms.map((room) => `${room.code}:${room.players}/4`).join(', '));
+  if (rooms.length !== 5) throw new Error('tienlen must expose 5 tables');
+
+  const alice = await openBattle('/api/room/BAN01');
+  alice.ws.send(JSON.stringify({ type: 'join', id: playerId(), name: 'Alice', avatar: 1 }));
+  const joined = await waitFor(alice.received, (m) => m.type === 'state' && m.players.length === 1, 'alice in BAN01');
+  console.log('tienlen join ok —', joined.players[0].name, '| phase:', joined.phase);
+  alice.ws.send(JSON.stringify({ type: 'start' }));
+  const blocked = await waitFor(alice.received, (m) => m.type === 'error', 'start blocked with 1 player');
+  if (!/ít nhất 2 người/.test(blocked.message)) throw new Error(`unexpected start error: ${blocked.message}`);
+  console.log('tienlen start blocked with 1 player (need 2+): OK');
+  alice.ws.close();
+}
+
 console.log('\nE2E SMOKE PASSED ✅');

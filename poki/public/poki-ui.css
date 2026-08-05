@@ -1,17 +1,14 @@
-/* Poki Duel — Game Room integration styles: hub link, account, 5-table lobby, auth, toast. */
+/* Poki Duel — Game Room integration styles: hub link, nickname, 5-table lobby, toast. */
 .hub-link{display:inline-block;color:#8fc9dd;font:800 10px 'Barlow Condensed';letter-spacing:.16em;text-decoration:none;border:1px solid #5e8ba244;padding:5px 9px;margin-bottom:10px;transition:.18s}.hub-link:hover{color:var(--gold);border-color:var(--gold)}
 .connecting .brand{text-align:center}
 .arena-header .brand{display:flex;flex-direction:column;align-items:flex-start;line-height:1.1}
 .arena-header .brand .hub-link{margin-bottom:7px}
 
-.account-area{border-top:1px solid #6792a644;padding:12px 0 4px}
+.nick-area{border-top:1px solid #6792a644;padding:12px 0 4px}
 .mini-label{display:block;color:var(--cyan);font:800 10px 'Barlow Condensed';letter-spacing:.18em;margin-bottom:8px}
-.account-chip{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;background:#071522;border:1px solid #719db4}
-.account-chip b{font:800 14px 'Barlow Condensed';letter-spacing:.05em;color:#eaf7ff}
-.account-action{border:0;background:transparent;color:#9db6c7;font:800 10px 'Barlow Condensed';letter-spacing:.12em;cursor:pointer;padding:4px}
-.account-action:hover{color:var(--gold)}
-.login-link{width:100%;padding:11px;border:1px solid var(--gold);background:#0a1a2a;color:var(--gold);font:800 11px 'Barlow Condensed';letter-spacing:.12em;cursor:pointer;transition:.18s}
-.login-link:hover{background:#122d43}
+.nick-input{width:100%;padding:11px 12px;background:#071522;border:1px solid #719db4;color:white;font:800 12px 'Barlow Condensed';letter-spacing:.1em}
+.nick-input:focus{outline:0;border-color:var(--cyan)}
+.nick-input::placeholder{color:#7195a8;font-weight:600}
 
 .tables-eyebrow{margin-top:18px}
 .table-list{display:grid;gap:6px;max-height:240px;overflow:auto}
@@ -25,26 +22,6 @@
 .table-status{font:800 9px 'Barlow Condensed';letter-spacing:.08em;color:#74ef9a;white-space:nowrap}
 .table-row.locked .table-status{color:#9db6c7}
 .table-loading{color:#83aec4;font-size:11px;padding:10px 0}
-
-.auth-backdrop{position:fixed;z-index:30;inset:0;background:#02060be6;backdrop-filter:blur(4px)}
-.auth-panel{position:fixed;z-index:31;top:50%;left:50%;transform:translate(-50%,-50%);width:min(720px,calc(100% - 30px));max-height:88vh;overflow:auto;padding:26px 24px 24px;border:1px solid #9dd8e9;background:linear-gradient(160deg,#123854,#091a2c);box-shadow:0 20px 80px #000c}
-.auth-panel .eyebrow{margin-bottom:8px}
-.auth-panel h2{margin:0 0 8px;padding-right:40px;font:900 clamp(24px,5vw,32px)/1 'Barlow Condensed';letter-spacing:.03em}
-.auth-lead{color:#b7d0dc;font-size:12px;line-height:1.6;margin:0 0 16px}
-.auth-close{position:absolute;top:12px;right:14px;z-index:2;width:38px;height:38px;display:grid;place-items:center;border:1px solid #4e7a92;border-radius:50%;background:#071522;color:#d5f5ff;font-size:16px;line-height:1;cursor:pointer}
-.auth-close:hover{border-color:var(--gold);color:var(--gold)}
-.auth-columns{display:grid;grid-template-columns:1fr 1fr;gap:24px}
-.auth-column{min-width:0}
-.auth-column h3{margin:0 0 12px;color:var(--gold);font:800 11px 'Barlow Condensed';letter-spacing:.16em}
-.auth-column + .auth-column{padding-left:24px;border-left:1px solid #4e7a92}
-.auth-form{display:grid;gap:10px}
-.field-label{color:#8fc9dd;font:800 10px 'Barlow Condensed';letter-spacing:.16em}
-.text-input{width:100%;padding:11px 12px;background:#071522;border:1px solid #4e7a92;color:#f5fbff;font:600 13px Manrope;border-radius:0}
-.text-input:focus{outline:0;border-color:var(--cyan)}
-.auth-submit{margin-top:8px;padding:13px;border:0;background:var(--gold);color:#1c2330;font:900 14px 'Barlow Condensed';letter-spacing:.1em;cursor:pointer;box-shadow:0 5px #a26132}
-.auth-submit b{float:right;font-size:19px;line-height:13px}
-.auth-error{min-height:18px;margin-top:12px;color:#ff818f;font-size:11px}
-.modal-open{overflow:hidden}
 
 .leave{margin-left:6px;border:1px solid #c96a5e;background:#2a1418cc;color:#ffb3a8;padding:9px 11px;font:800 10px 'Barlow Condensed';letter-spacing:.1em;cursor:pointer}
 .leave:hover{border-color:#ff6f65;color:#fff}
@@ -61,7 +38,5 @@
   .arena-header .brand .hub-link{font-size:9px}
 }
 @media(max-width:640px){
-  .auth-panel{width:calc(100% - 20px);padding:22px 18px 20px}
-  .auth-columns{grid-template-columns:1fr;gap:22px}
-  .auth-column + .auth-column{padding-left:0;padding-top:20px;border-left:0;border-top:1px solid #4e7a92}
+  .nick-input{font-size:11px}
 }

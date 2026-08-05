@@ -1,0 +1,60 @@
+// XO — Tic-Tac-Toe core rules. Pure logic, shared by the Worker (XoRoom) and the browser client.
+
+export const SIZE = 3;
+export const WIN_LINES = [
+  [0, 1, 2], [3, 4, 5], [6, 7, 8], // rows
+  [0, 3, 6], [1, 4, 7], [2, 5, 8], // columns
+  [0, 4, 8], [2, 4, 6],            // diagonals
+];
+
+export function emptyBoard() {
+  return Array(9).fill(null);
+}
+
+export function initialGame() {
+  return { board: emptyBoard(), players: [], turn: 0, gameOver: false, winner: null, draw: false, lastMove: null };
+}
+
+export function addPlayer(game, player) {
+  if (game.players.some((p) => p.id === player.id) || game.players.length >= 2) return game;
+  const symbol = game.players.length === 0 ? 'X' : 'O';
+  return { ...game, players: [...game.players, { id: player.id, name: player.name, symbol, connected: true }] };
+}
+
+export function makeMove(game, playerId, cell) {
+  const index = Number(cell);
+  if (!Number.isInteger(index) || index < 0 || index >= SIZE * SIZE) return { ok: false, error: 'Ô không hợp lệ.' };
+  if (game.gameOver) return { ok: false, error: 'Trận đã kết thúc.' };
+  if (game.board[index]) return { ok: false, error: 'Ô này đã được đánh.' };
+  const player = game.players[game.turn % Math.max(1, game.players.length)];
+  if (!player || player.id !== playerId) return { ok: false, error: 'Chưa đến lượt bạn.' };
+  const symbol = player.symbol;
+  const board = [...game.board];
+  board[index] = symbol;
+  const win = WIN_LINES.some((line) => line.every((i) => board[i] === symbol));
+  const draw = !win && board.every(Boolean);
+  return {
+    ok: true,
+    game: {
+      ...game,
+      board,
+      turn: game.turn + 1,
+      gameOver: Boolean(win || draw),
+      winner: win ? playerId : null,
+      draw,
+      lastMove: { player: playerId, cell: index, symbol },
+    },
+  };
+}
+
+export function restartGame(game) {
+  return {
+    board: emptyBoard(),
+    players: game.players.map((player) => ({ ...player, connected: true })),
+    turn: 0,
+    gameOver: false,
+    winner: null,
+    draw: false,
+    lastMove: null,
+  };
+}
