@@ -180,10 +180,6 @@ export function addPlayer(state, id, monster) {
   return { ...state, players: [...state.players, { id, monster }], hp: { ...state.hp, [id]: MONSTERS[monster].maxHp }, mana: { ...state.mana, [id]: 0 }, shield: { ...state.shield, [id]: 0 } };
 }
 
-export function canClaimPlayerConnection(existingIds, requestedId, currentId) {
-  return currentId ? currentId === requestedId : !existingIds.includes(requestedId);
-}
-
 export function damageTarget(state, id, damage) {
   const safeDamage = Number.isFinite(damage) ? Math.max(0, damage) : 0;
   const shield = Number.isFinite(state.shield[id]) ? Math.max(0, state.shield[id]) : 0;

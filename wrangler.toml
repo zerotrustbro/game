@@ -41,6 +41,3 @@ deleted_classes = ["AccountStore"]
 
 [observability]
 enabled = false
-
-[vars]
-GAME_NAME = "Tiến Lên Miền Nam"

@@ -2,7 +2,7 @@ import { dealGame, passMove, playMove, skipLead } from '../tienlen/public/engine
 import { ROOM_CODES } from '../tienlen/public/routes.js';
 import { applyBattleDamage, applySpecial, applySpecialTurn, createBoard, initialRoom, MONSTERS, resolveSwap, SIZE } from '../poki/public/game.js';
 import { POKI_ROOM_CODES } from '../poki/public/routes.js';
-import { addPlayer as xoAddPlayer, evaluateBoard as xoEvaluateBoard, initialGame, makeMove as xoMove, restartGame as xoRestart } from '../xo/public/game.js';
+import { addPlayer as xoAddPlayer, evaluateBoard as xoEvaluateBoard, initialGame, makeMove as xoMove } from '../xo/public/game.js';
 import { XO_ROOM_CODES } from '../xo/public/routes.js';
 
 const MAX_PLAYERS = 4;
@@ -52,7 +52,7 @@ function xoRoomCode(pathname) {
 }
 
 function emptyRoom() {
-  return { phase: 'lobby', hostId: null, players: [], game: null, roomCode: null, roundId: null };
+  return { phase: 'lobby', hostId: null, players: [], game: null, roomCode: null };
 }
 
 function normalizeRoom(saved) {
@@ -68,7 +68,6 @@ function normalizeRoom(saved) {
   if (!['lobby', 'game'].includes(room.phase)) {
     room.phase = 'lobby';
     room.game = null;
-    room.roundId = null;
     changed = true;
   }
   const usedIds = new Set();
@@ -132,7 +131,6 @@ function normalizeRoom(saved) {
   if (room.phase === 'game' && room.game && (!Array.isArray(room.game.players) || room.game.players.length < 2)) {
     room.phase = 'lobby';
     room.game = null;
-    room.roundId = null;
     changed = true;
   } else if (room.phase === 'lobby' && room.game) {
     room.game = null;
@@ -159,7 +157,7 @@ export class Room {
         // persisted seat is a ghost. Mark them offline so the seats (and the
         // host role) can be reclaimed, and reopen a mid-game table as a lobby.
         for (const player of this.room.players) if (player.connected) { player.connected = false; changed = true; }
-        if (this.room.phase === 'game') { this.room.phase = 'lobby'; this.room.game = null; this.room.roundId = null; changed = true; }
+        if (this.room.phase === 'game') { this.room.phase = 'lobby'; this.room.game = null; changed = true; }
         // Keep the host role when the host's seat survived; free it otherwise.
         if (this.room.hostId && !this.room.players.some((player) => player.id === this.room.hostId)) { this.room.hostId = null; changed = true; }
       }
@@ -250,7 +248,7 @@ export class Room {
     if (connectedPlayers.length < 2) return this.error(session, 'Cần ít nhất 2 người đang kết nối để bắt đầu.');
     if (connectedPlayers.length !== this.room.players.length) {
       this.room.players = connectedPlayers;
-      this.room.hostId = connectedPlayers.find((player) => player.connected)?.id || null;
+      this.room.hostId = connectedPlayers[0].id;
     }
     await this.beginRound();
   }
@@ -309,7 +307,6 @@ export class Room {
 
   async beginRound() {
     this.room.game = dealGame(this.gamePlayers());
-    this.room.roundId = crypto.randomUUID();
     this.room.phase = 'game';
     await this.save();
     this.broadcastState();
@@ -1004,37 +1001,17 @@ export class XoRoom {
 
 // ---------- public room summaries ----------
 
-async function roomSummary(env, code, playerId) {
+// One probe per game family; a broken table degrades to a non-joinable
+// placeholder instead of exposing a broken entry in the lobby list.
+async function roomSummary(env, binding, code, playerId, unavailable) {
   const headers = new Headers({ 'x-internal-room': '1' });
   try {
-    const response = await env.ROOMS.get(env.ROOMS.idFromName(code)).fetch(new Request(`https://room/summary?code=${code}&pid=${encodeURIComponent(playerId || '')}`, { headers }));
+    const response = await env[binding].get(env[binding].idFromName(code)).fetch(new Request(`https://room/summary?code=${code}&pid=${encodeURIComponent(playerId || '')}`, { headers }));
     if (response.ok) return response.json();
   } catch {
     // Report an unavailable table as non-joinable instead of exposing a broken entry.
   }
-  return { code, players: 0, maxPlayers: MAX_PLAYERS, phase: 'unavailable', canJoin: false };
-}
-
-async function pokiRoomSummary(env, code, playerId) {
-  const headers = new Headers({ 'x-internal-room': '1' });
-  try {
-    const response = await env.POKI_ROOMS.get(env.POKI_ROOMS.idFromName(code)).fetch(new Request(`https://pokiroom/summary?code=${code}&pid=${encodeURIComponent(playerId || '')}`, { headers }));
-    if (response.ok) return response.json();
-  } catch {
-    // Report an unavailable table as non-joinable instead of exposing a broken entry.
-  }
-  return { code, players: 0, maxPlayers: POKI_MAX_PLAYERS, phase: 'unavailable', canJoin: false, gameOver: false };
-}
-
-async function xoRoomSummary(env, code, playerId) {
-  const headers = new Headers({ 'x-internal-room': '1' });
-  try {
-    const response = await env.XO_ROOMS.get(env.XO_ROOMS.idFromName(code)).fetch(new Request(`https://xoroom/summary?code=${code}&pid=${encodeURIComponent(playerId || '')}`, { headers }));
-    if (response.ok) return response.json();
-  } catch {
-    // Report an unavailable table as non-joinable instead of exposing a broken entry.
-  }
-  return { code, players: 0, maxPlayers: XO_MAX_PLAYERS, phase: 'unavailable', canJoin: false, gameOver: false };
+  return { code, ...unavailable };
 }
 
 export default {
@@ -1043,19 +1020,19 @@ export default {
     if (url.pathname === '/api/rooms') {
       if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
       const pid = url.searchParams.get('pid') || '';
-      const rooms = await Promise.all(ROOM_CODES.map((code) => roomSummary(env, code, pid)));
+      const rooms = await Promise.all(ROOM_CODES.map((code) => roomSummary(env, 'ROOMS', code, pid, { players: 0, maxPlayers: MAX_PLAYERS, phase: 'unavailable', canJoin: false })));
       return json({ rooms });
     }
     if (url.pathname === '/api/poki/rooms') {
       if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
       const pid = url.searchParams.get('pid') || '';
-      const rooms = await Promise.all(POKI_ROOM_CODES.map((code) => pokiRoomSummary(env, code, pid)));
+      const rooms = await Promise.all(POKI_ROOM_CODES.map((code) => roomSummary(env, 'POKI_ROOMS', code, pid, { players: 0, maxPlayers: POKI_MAX_PLAYERS, phase: 'unavailable', canJoin: false, gameOver: false })));
       return json({ rooms });
     }
     if (url.pathname === '/api/xo/rooms') {
       if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
       const pid = url.searchParams.get('pid') || '';
-      const rooms = await Promise.all(XO_ROOM_CODES.map((code) => xoRoomSummary(env, code, pid)));
+      const rooms = await Promise.all(XO_ROOM_CODES.map((code) => roomSummary(env, 'XO_ROOMS', code, pid, { players: 0, maxPlayers: XO_MAX_PLAYERS, phase: 'unavailable', canJoin: false, gameOver: false })));
       return json({ rooms });
     }
     if (url.pathname === '/api/health') {

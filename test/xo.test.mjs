@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker, { XoRoom } from '../worker/index.js';
-import { addPlayer, emptyBoard, initialGame, makeMove, restartGame } from '../xo/public/game.js';
+import { addPlayer, emptyBoard, initialGame, makeMove } from '../xo/public/game.js';
 
 function createSocket() {
   return {
@@ -101,16 +101,6 @@ test('a full board with no line is a draw', () => {
   assert.equal(game.gameOver, true);
   assert.equal(game.draw, true);
   assert.equal(game.winner, null);
-});
-
-test('restart resets the board and keeps both players', () => {
-  const game = addPlayer(addPlayer(initialGame(), { id: 'a' }), { id: 'b' });
-  const played = makeMove(game, 'a', 0).game;
-  const again = restartGame({ ...played, gameOver: true, winner: 'a' });
-  assert.deepEqual(again.board, emptyBoard());
-  assert.equal(again.turn, 0);
-  assert.equal(again.players.length, 2);
-  assert.ok(!again.gameOver);
 });
 
 // ---- XoRoom ----

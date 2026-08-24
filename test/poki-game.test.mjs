@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { addPlayer, applyBattleDamage, applySpecial, applySpecialTurn, canClaimPlayerConnection, createBoard, damageTarget, initialRoom, MONSTERS, resolveSwap, validMoves } from '../poki/public/game.js';
+import { addPlayer, applyBattleDamage, applySpecial, applySpecialTurn, createBoard, damageTarget, initialRoom, MONSTERS, resolveSwap, validMoves } from '../poki/public/game.js';
 
 const GEMS = ['sword', 'heart', 'mana'];
 
@@ -199,9 +199,4 @@ test('a room holds at most two players', () => {
   assert.equal(third.players.length, 2);
 });
 
-test('connection identity prevents claiming an existing player', () => {
-  assert.equal(canClaimPlayerConnection(['player-a'], 'player-a'), false);
-  assert.equal(canClaimPlayerConnection(['player-a'], 'player-b'), true);
-  assert.equal(canClaimPlayerConnection(['player-a'], 'player-a', 'player-a'), true);
-  assert.equal(canClaimPlayerConnection(['player-a'], 'player-b', 'player-a'), false);
-});
+

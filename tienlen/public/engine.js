@@ -7,18 +7,6 @@ const randomIndex = (random, length) => {
   const safe = Number.isFinite(value) ? value : 0;
   return Math.min(length - 1, Math.max(0, Math.floor(safe * length)));
 };
-const COMBO_NAMES = Object.freeze({
-  single: 'Lá lẻ',
-  pair: 'Đôi',
-  triple: 'Sám',
-  straight: 'Sảnh',
-  four: 'Tứ quý',
-  pairseq: 'Đôi thông',
-});
-
-export const CARD_RANKS = RANKS;
-export const CARD_SUITS = SUITS;
-
 export function cardRank(card) {
   return String(card).slice(0, -1);
 }
@@ -113,7 +101,6 @@ export function createGame(players, options = {}) {
     mustStart: options.mustStart ?? false,
     gameOver: false,
     winner: null,
-    startedAt: options.startedAt ?? Date.now(),
   };
 }
 
@@ -193,9 +180,3 @@ export function skipLead(game) {
   if (game.mustStart) next.mustStart = false;
   return next;
 }
-
-export function describeComboForUi(combo) {
-  return COMBO_NAMES[combo?.type] || 'Bộ bài';
-}
-
-export const describeComboName = describeComboForUi;

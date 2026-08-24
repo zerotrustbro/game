@@ -55,14 +55,4 @@ export function makeMove(game, playerId, cell) {
   };
 }
 
-export function restartGame(game) {
-  return {
-    board: emptyBoard(),
-    players: game.players.map((player) => ({ ...player, connected: player.connected !== false })),
-    turn: 0,
-    gameOver: false,
-    winner: null,
-    draw: false,
-    lastMove: null,
-  };
-}
+

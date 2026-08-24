@@ -65,7 +65,6 @@ test('hydrated ghost game rooms reopen as joinable lobbies', async () => {
     ],
     game: { players: [{ id: 'host-player', hand: [] }, { id: 'guest-player', hand: ['3s'] }], turnIndex: 0, currentPlay: null, passCount: 0, mustStart: true, gameOver: false, winner: null },
     roomCode: 'BAN01',
-    roundId: 'ROUND1',
   });
   // After a DO eviction/restart no WebSocket survives: seats become ghosts,
   // a mid-game table is reopened as a lobby, and the host role stays with
@@ -125,7 +124,6 @@ test('a full lobby of ghost seats is reclaimable by a newcomer', async () => {
     ],
     game: null,
     roomCode: 'BAN01',
-    roundId: null,
   });
   assert.equal(room.summary('stranger').canJoin, true);
 
@@ -222,7 +220,6 @@ test('legacy saved rooms drop account fields during normalization', async () => 
     ],
     game: null,
     roomCode: 'BAN01',
-    roundId: null,
     settlement: { status: 'complete', penalty: 10, changes: [] },
   });
 
@@ -251,12 +248,11 @@ test('legacy game rooms drop account fields and stale matches during rehydration
       ],
       turnIndex: 0, currentPlay: null, passCount: 0, mustStart: true, gameOver: false, winner: null,
     },
-    roomCode: 'BAN01', roundId: 'ROUND1',
+    roomCode: 'BAN01',
   });
   // the stale match cannot resume without its players, so it is discarded
   assert.equal(room.room.phase, 'lobby');
   assert.equal(room.room.game, null);
-  assert.equal(room.room.roundId, null);
   assert.ok(room.room.players.every((player) => player.connected === false));
   const persisted = room.getPersisted();
   assert.ok(persisted.players.every((player) => !('accountId' in player) && !('xu' in player) && !('coins' in player)));
