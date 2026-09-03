@@ -88,7 +88,7 @@ const server = http.createServer(async (req, res) => {
       }
       if (url.pathname === '/api/health') {
         res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ ok: true, service: 'game', games: ['tienlen', 'poki', 'xo'] }));
+        res.end(JSON.stringify({ ok: true, service: 'game', games: ['tienlen', 'poki', 'xo', 'flappy'] }));
         return;
       }
       res.writeHead(404, { 'content-type': 'application/json' });
@@ -98,6 +98,7 @@ const server = http.createServer(async (req, res) => {
     let pathname = url.pathname === '/' ? '/index.html' : url.pathname;
     if (pathname === '/poki' || pathname === '/poki/') pathname = '/poki/index.html';
     if (pathname === '/xo' || pathname === '/xo/') pathname = '/xo/index.html';
+    if (pathname === '/flappy' || pathname === '/flappy/') pathname = '/flappy/index.html';
     const file = path.join(root, pathname);
     const data = await readFile(file);
     res.writeHead(200, { 'content-type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream' });
@@ -165,5 +166,5 @@ server.on('upgrade', async (req, socket, head) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Game Room dev mock on http://localhost:${PORT}/  (poki: /poki/ · xo: /xo/)`);
+  console.log(`Game Room dev mock on http://localhost:${PORT}/  (poki: /poki/ · xo: /xo/ · flappy: /flappy/)`);
 });

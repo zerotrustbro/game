@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#071b1d" />
+    <meta name="description" content="Flappy Cutie — game chim cute bay qua ống, chơi ngay không cần tài khoản." />
+    <title>Flappy — Chim cute</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/flappy/flappy.css?v=flappy-1" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="Về Game Room hub"><span class="brand-mark">🐤</span><span><b>FLAPPY</b><small>CHIM CUTE</small></span></a>
+        <div class="topbar-right"><label class="nick-field" for="nickname"><span>BIỆT DANH</span><input id="nickname" class="nick-input" maxlength="18" placeholder="Tên của bạn" autocomplete="nickname" /></label><button class="icon-button" id="soundButton" type="button" aria-label="Bật tắt âm thanh">◖</button></div>
+      </header>
+      <main>
+        <div class="flappy-layout">
+          <div class="hero-copy">
+            <p class="eyebrow">CHƠI NGAY · KHÔNG CẦN TÀI KHOẢN</p>
+            <h1>Flappy<br /><em>Chim cute</em></h1>
+            <p class="hero-lead">Chạm, click hoặc phím cách để vỗ cánh. Lách qua càng nhiều ống càng tốt — ống càng lúc càng nhanh và càng hẹp.</p>
+            <div class="hero-rule"><span></span><i>🐤 ☁️ 🌱</i><span></span></div>
+            <div class="stat-row">
+              <span class="stat-pill">⭐ Điểm: <b id="statScore">0</b></span>
+              <span class="stat-pill">🏆 Kỷ lục: <b id="statBest">0</b></span>
+              <span class="stat-pill">🎖 Huy chương: <b id="statMedal">🌱</b></span>
+            </div>
+          </div>
+          <div class="game-card">
+            <div class="game-frame"><canvas id="game" width="420" height="640" aria-label="Flappy Cutie — chạm để bay"></canvas></div>
+            <div class="game-bar">
+              <button class="primary-button" id="flapBtn" type="button">🐥 Vỗ cánh</button>
+              <button class="ghost-button" id="restartBtn" type="button">↻ Chơi lại</button>
+            </div>
+            <p class="form-note"><kbd>Cách</kbd> / <kbd>↑</kbd> / chạm để bay · <kbd>R</kbd> chơi lại. Kỷ lục lưu trên máy bạn.</p>
+          </div>
+        </div>
+      </main>
+      <div class="toast" id="toast" role="status"></div>
+    </div>
+    <script type="module" src="/flappy/app.js?v=flappy-1"></script>
+  </body>
+</html>

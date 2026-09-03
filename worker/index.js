@@ -1037,7 +1037,7 @@ export default {
     }
     if (url.pathname === '/api/health') {
       if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
-      return json({ ok: true, service: 'game', games: ['tienlen', 'poki', 'xo'] });
+      return json({ ok: true, service: 'game', games: ['tienlen', 'poki', 'xo', 'flappy'] });
     }
     const pokiCode = pokiRoomCode(url.pathname);
     if (pokiCode) {
@@ -1062,6 +1062,9 @@ export default {
     }
     if (url.pathname === '/xo' || url.pathname === '/xo/') {
       return env.ASSETS.fetch(new Request(new URL('/xo/index.html', url), request));
+    }
+    if (url.pathname === '/flappy' || url.pathname === '/flappy/') {
+      return env.ASSETS.fetch(new Request(new URL('/flappy/index.html', url), request));
     }
     if (url.pathname.startsWith('/api/')) return json({ error: 'Không tìm thấy API này.' }, 404);
     return env.ASSETS.fetch(request);

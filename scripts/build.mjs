@@ -7,4 +7,5 @@ await rm(dist, { recursive: true, force: true });
 await cp(join(root, 'tienlen', 'public'), dist, { recursive: true });
 await cp(join(root, 'poki', 'public'), join(dist, 'poki'), { recursive: true });
 await cp(join(root, 'xo', 'public'), join(dist, 'xo'), { recursive: true });
-console.log('Built Tiến Lên + Poki + XO into dist');
+await cp(join(root, 'flappy', 'public'), join(dist, 'flappy'), { recursive: true });
+console.log('Built Tiến Lên + Poki + XO + Flappy into dist');

@@ -1,10 +1,11 @@
 # Game Hub
 
-A Cloudflare Workers game hub with **no accounts and no coins** — type a nickname and play. Three games live in sibling directories:
+A Cloudflare Workers game hub with **no accounts and no coins** — type a nickname and play. Four games live in sibling directories:
 
 - [`tienlen/`](./tienlen/) — **Tiến Lên Miền Nam**: a 2–4 player realtime card game on five fixed tables (`BAN01`–`BAN05`).
 - [`poki/`](./poki/) — **Poki Duel**: an original 1v1 creature gem-battle game on five fixed tables (`POKI01`–`POKI05`). Ported from the standalone `zerotrustbro/poki` project.
 - [`xo/`](./xo/) — **XO (Cờ ca-rô)**: a 1v1 tic-tac-toe game on five fixed tables (`XO01`–`XO05`).
+- [`flappy/`](./flappy/) — **Flappy Cutie**: cute single-player canvas Flappy Bird (offline, no rooms). Score persists in `localStorage`.
 
 ## Playing
 
@@ -22,6 +23,7 @@ A Cloudflare Workers game hub with **no accounts and no coins** — type a nickn
 - `/poki/?room=POKI01` — deep link to a specific Poki table.
 - `/xo` — XO lobby: five 1v1 tables.
 - `/xo/?room=XO01` — deep link to a specific XO table.
+- `/flappy` — Flappy Cutie: cute single-player canvas game (no rooms, works offline).
 
 The frontend uses History API routing with Cloudflare SPA fallback, so refreshes and shared room URLs return the same app shell and resolve on the client.
 
@@ -32,7 +34,7 @@ The frontend uses History API routing with Cloudflare SPA fallback, so refreshes
 - Build/deploy command: `npm run deploy`
 - Wrangler config: `wrangler.toml`
 
-The repository builds the Vite-free static clients into `dist/` (root = Tiến Lên, `dist/poki/`, `dist/xo/`), then Wrangler deploys them with the Worker and Durable Object room state. New games can be added as sibling directories without changing the deployment contract. Durable Objects: `Room` (Tiến Lên), `PokiRoom` (Poki 1v1), `XoRoom` (XO 1v1).
+The repository builds the Vite-free static clients into `dist/` (root = Tiến Lên, `dist/poki/`, `dist/xo/`, `dist/flappy/`), then Wrangler deploys them with the Worker and Durable Object room state. New games can be added as sibling directories without changing the deployment contract. Durable Objects: `Room` (Tiến Lên), `PokiRoom` (Poki 1v1), `XoRoom` (XO 1v1). Flappy needs no Durable Object (offline solo).
 
 ## Local
 
