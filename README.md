@@ -3,7 +3,7 @@
 A Cloudflare Workers game hub with **no accounts and no coins** — type a nickname and play. Three games live in sibling directories:
 
 - [`tienlen/`](./tienlen/) — **Tiến Lên Miền Nam**: a 2–4 player realtime card game on five fixed tables (`BAN01`–`BAN05`).
-- [`poki/`](./poki/) — **Poki Duel**: an original 1v1 creature gem-battle game on five fixed tables (`POKI01`–`POKI05`). Ported from the standalone `chungbuild/poki` project.
+- [`poki/`](./poki/) — **Poki Duel**: an original 1v1 creature gem-battle game on five fixed tables (`POKI01`–`POKI05`). Ported from the standalone `zerotrustbro/poki` project.
 - [`xo/`](./xo/) — **XO (Cờ ca-rô)**: a 1v1 tic-tac-toe game on five fixed tables (`XO01`–`XO05`).
 
 ## Playing
@@ -27,7 +27,7 @@ The frontend uses History API routing with Cloudflare SPA fallback, so refreshes
 
 ## Deploy with Cloudflare Git
 
-- Repository: `chungbuild/game`
+- Repository: `zerotrustbro/game`
 - Root directory: `/`
 - Build/deploy command: `npm run deploy`
 - Wrangler config: `wrangler.toml`
