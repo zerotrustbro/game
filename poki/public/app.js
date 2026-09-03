@@ -25,7 +25,7 @@ let id = localStorage.getItem('player-id') || crypto.randomUUID();
 localStorage.setItem('player-id', id);
 const monsterIds = Object.keys(MONSTERS);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const art = (mid, alt = MONSTERS[mid].name) => `<img src="/poki/creatures/${mid}.webp" alt="${esc(alt)}">`;
+const art = (mid, alt = MONSTERS[mid].name, lazy = false) => `<img src="/poki/creatures/${mid}.webp" alt="${esc(alt)}"${lazy ? ' loading="lazy" decoding="async"' : ''}>`;
 const normalizeRoom = (value) => String(value || '').trim().toUpperCase();
 
 function nickname() {
@@ -99,7 +99,7 @@ function renderLobby() {
     <section class="select-layout">
       <nav class="roster"><p class="eyebrow">CHỌN CHIẾN BINH</p>${monsterIds.map((mid) => {
         const m = MONSTERS[mid];
-        return `<button class="roster-item ${mid === preview ? 'active' : ''}" data-monster="${mid}"><span>${art(mid)}</span><b>${m.name}</b><small>${m.skill.name}</small></button>`;
+        return `<button class="roster-item ${mid === preview ? 'active' : ''}" data-monster="${mid}"><span>${art(mid, MONSTERS[mid].name, true)}</span><b>${m.name}</b><small>${m.skill.name}</small></button>`;
       }).join('')}</nav>
       <section class="showcase monster-${preview}"><div class="showcase-backdrop"></div><div class="creature-large">${art(preview)}</div><div class="creature-plaque"><span>POKI CREATURE / 0${monsterIds.indexOf(preview) + 1}</span><h1>${MONSTERS[preview].name}</h1><p>${skillSummary(preview)}</p></div></section>
       <aside class="loadout"><p class="eyebrow">HỒ SƠ CHIẾN ĐẤU</p><h2>${monster.skill.name}</h2><p class="loadout-copy">Một chiến binh nguyên bản với nhịp chơi riêng. Ghép Kiếm để tấn công, Tim để hồi HP, Mana để mở tuyệt kỹ.</p><div class="stat"><span>SỨC MẠNH TUYỆT KỸ</span><b>${monster.skill.damage}</b></div><div class="stat"><span>HP KHỞI ĐẦU</span><b>${monster.maxHp}</b></div><div class="stat"><span>MANA KHỞI ĐẦU</span><b>0</b></div><div class="loadout-rule"><i>⚔</i><span>Ghép 3 gem cùng loại<br><small>Không có kỹ năng chủ động trước khi đủ 100 Mana.</small></span></div>

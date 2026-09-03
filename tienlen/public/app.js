@@ -11,7 +11,7 @@ const state = {
   playerId: null,
   id: localStorage.getItem('player-id') || crypto.randomUUID(),
   name: localStorage.getItem('game-nick') || '',
-  avatar: Number(localStorage.getItem('tienlen-avatar') || 1),
+  avatar: (() => { const saved = Number(localStorage.getItem('tienlen-avatar') || 1); return Number.isInteger(saved) && saved >= 1 && saved <= 8 ? saved : 1; })(),
   room: null,
   rooms: [],
   roomsLoading: false,
@@ -222,7 +222,7 @@ function applyRoute(route = parseRoute(location.pathname)) {
 }
 
 function renderAvatarPicker() {
-  avatarPicker.innerHTML = AVATARS.map((src, index) => `<button class="avatar-choice ${state.avatar === index + 1 ? 'selected' : ''}" type="button" data-avatar="${index + 1}" aria-label="Chân dung ${index + 1}" aria-checked="${state.avatar === index + 1}"><img src="${src}" alt="" /></button>`).join('');
+  avatarPicker.innerHTML = AVATARS.map((src, index) => `<button class="avatar-choice ${state.avatar === index + 1 ? 'selected' : ''}" type="button" data-avatar="${index + 1}" aria-label="Chân dung ${index + 1}" aria-checked="${state.avatar === index + 1}"><img src="${src}" alt="" loading="lazy" decoding="async" /></button>`).join('');
 }
 
 function seatMarkup(player, isLocal, isTurn) {
@@ -247,7 +247,7 @@ function renderRoom() {
   $('seatLeft').innerHTML = seatMarkup(left, false, left?.id === room.turnPlayerId);
   $('seatRight').innerHTML = seatMarkup(right, false, right?.id === room.turnPlayerId);
   $('seatBottom').innerHTML = seatMarkup(bottom, true, bottom?.id === room.turnPlayerId);
-  $('lobbyPlayers').innerHTML = players.map((player) => `<span class="lobby-player ${player.connected ? '' : 'offline'}"><img src="${AVATARS[(player.avatar || 1) - 1]}" alt="" />${esc(player.name)}</span>`).join('');
+  $('lobbyPlayers').innerHTML = players.map((player) => `<span class="lobby-player ${player.connected ? '' : 'offline'}"><img src="${AVATARS[(player.avatar || 1) - 1] || AVATARS[0]}" alt="" loading="lazy" decoding="async" />${esc(player.name)}</span>`).join('');
   $('startButton').classList.toggle('hidden', room.phase !== 'lobby' || !isHost);
   $('rematchButton').classList.toggle('hidden', !room.gameOver || !isHost);
   $('roomTitle').textContent = room.gameOver ? `${room.winner === room.you ? 'Bạn thắng ván này' : 'Ván đã kết thúc'}` : room.phase === 'game' ? (isTurn ? 'Đến lượt bạn' : 'Đang trong ván') : 'Đang chờ người chơi';
